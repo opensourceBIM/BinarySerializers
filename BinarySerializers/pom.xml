@@ -130,6 +130,7 @@
 		<url>https://github.com/opensourceBIM/BinarySerializers/issues</url>
 	</issueManagement>
 	<name>BinarySerializers</name>
+	<description>BIMserver plugins that provides binary serializers</description>
 	<url>https://github.com/opensourceBIM/BinarySerializers</url>
 	<licenses>
 		<license>
