@@ -2,7 +2,7 @@
 	<modelVersion>4.0.0</modelVersion>
 	<groupId>org.opensourcebim</groupId>
 	<artifactId>BinarySerializers</artifactId>
-	<version>0.0.2</version>
+	<version>0.0.3-SNAPSHOT</version>
 	<build>
 		<sourceDirectory>src</sourceDirectory>
 		<resources>
@@ -119,7 +119,7 @@
 		<url>https://github.com/opensourceBIM/BinarySerializers.git</url>
 		<connection>scm:git:https://github.com/opensourceBIM/BinarySerializers.git</connection>
 		<developerConnection>scm:git:https://github.com/opensourceBIM/BinarySerializers.git</developerConnection>
-	  <tag>BinarySerializers-0.0.2</tag>
+	  <tag>HEAD</tag>
   </scm>
 	<organization>
 		<name>OpenSource BIM</name>
