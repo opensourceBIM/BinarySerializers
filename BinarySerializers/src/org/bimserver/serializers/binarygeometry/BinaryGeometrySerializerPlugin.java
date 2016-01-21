@@ -29,16 +29,8 @@ import org.bimserver.shared.exceptions.PluginException;
 @Deprecated
 public class BinaryGeometrySerializerPlugin extends AbstractSerializerPlugin {
 
-	private boolean initialized;
-
 	@Override
 	public void init(PluginManagerInterface pluginManager) throws PluginException {
-		initialized = true;
-	}
-
-	@Override
-	public String getDescription() {
-		return "BinaryGeometrySerializer";
 	}
 
 	@Override
@@ -47,23 +39,8 @@ public class BinaryGeometrySerializerPlugin extends AbstractSerializerPlugin {
 	}
 
 	@Override
-	public String getVersion() {
-		return "1.0";
-	}
-
-	@Override
-	public boolean isInitialized() {
-		return initialized;
-	}
-
-	@Override
 	public Serializer createSerializer(PluginConfiguration plugin) {
 		return new BinaryGeometrySerializer();
-	}
-
-	@Override
-	public boolean needsGeometry() {
-		return true;
 	}
 
 	@Override

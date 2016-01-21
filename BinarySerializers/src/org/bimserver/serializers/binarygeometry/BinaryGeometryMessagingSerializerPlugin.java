@@ -29,36 +29,13 @@ import org.bimserver.shared.exceptions.PluginException;
 
 public class BinaryGeometryMessagingSerializerPlugin implements MessagingSerializerPlugin {
 
-	private boolean initialized;
-
 	@Override
 	public void init(PluginManagerInterface pluginManager) throws PluginException {
-		initialized = true;
-	}
-
-	@Override
-	public String getDescription() {
-		return "BinaryGeometryMessagingSerializer";
 	}
 
 	@Override
 	public String getDefaultName() {
 		return "BinaryGeometryMessagingSerializer";
-	}
-
-	@Override
-	public String getVersion() {
-		return "1.0";
-	}
-
-	@Override
-	public boolean isInitialized() {
-		return initialized;
-	}
-
-	@Override
-	public boolean needsGeometry() {
-		return true;
 	}
 
 	@Override
