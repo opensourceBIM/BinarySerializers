@@ -1,21 +1,18 @@
 <?xml version="1.0" encoding="utf-8"?>
 <PluginDescriptor>
-	<PluginImplementation>
+	<JavaPlugin>
 		<interfaceClass>org.bimserver.plugins.serializers.SerializerPlugin</interfaceClass>
 		<implementationClass>org.bimserver.serializers.binarygeometry.BinaryGeometrySerializerPlugin</implementationClass>
 		<description>BinaryGeometrySerializer</description>
-		<enabled>true</enabled>
-	</PluginImplementation>
-	<PluginImplementation>
+	</JavaPlugin>
+	<JavaPlugin>
 		<interfaceClass>org.bimserver.plugins.serializers.MessagingSerializerPlugin</interfaceClass>
 		<implementationClass>org.bimserver.serializers.binarygeometry.BinaryGeometryMessagingSerializerPlugin</implementationClass>
 		<description>BinaryGeometryMessagingSerializer</description>
-		<enabled>true</enabled>
-	</PluginImplementation>
-	<PluginImplementation>
+	</JavaPlugin>
+	<JavaPlugin>
 		<interfaceClass>org.bimserver.plugins.serializers.MessagingStreamingSerializerPlugin</interfaceClass>
 		<implementationClass>org.bimserver.serializers.binarygeometry.BinaryGeometryMessagingStreamingSerializerPlugin</implementationClass>
 		<description>BinaryGeometryMessagingStreamingSerializer</description>
-		<enabled>true</enabled>
-	</PluginImplementation>
+	</JavaPlugin>
 </PluginDescriptor>
