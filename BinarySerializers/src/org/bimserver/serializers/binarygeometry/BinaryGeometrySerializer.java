@@ -45,11 +45,6 @@ public class BinaryGeometrySerializer extends AbstractGeometrySerializer {
 	private static final byte GEOMETRY_TYPE_INSTANCE = 1;
 
 	@Override
-	public void reset() {
-		setMode(Mode.BODY);
-	}
-
-	@Override
 	protected boolean write(OutputStream outputStream, ProgressReporter progressReporter) throws SerializerException {
 		if (getMode() == Mode.BODY) {
 			try {
