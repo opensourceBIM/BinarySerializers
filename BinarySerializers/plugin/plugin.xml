@@ -3,16 +3,19 @@
 	<JavaPlugin>
 		<interfaceClass>org.bimserver.plugins.serializers.SerializerPlugin</interfaceClass>
 		<implementationClass>org.bimserver.serializers.binarygeometry.BinaryGeometrySerializerPlugin</implementationClass>
+		<name>BinaryGeometrySerializer</name>
 		<description>BinaryGeometrySerializer</description>
 	</JavaPlugin>
 	<JavaPlugin>
 		<interfaceClass>org.bimserver.plugins.serializers.MessagingSerializerPlugin</interfaceClass>
 		<implementationClass>org.bimserver.serializers.binarygeometry.BinaryGeometryMessagingSerializerPlugin</implementationClass>
+		<name>BinaryGeometryMessagingSerializer</name>
 		<description>BinaryGeometryMessagingSerializer</description>
 	</JavaPlugin>
 	<JavaPlugin>
 		<interfaceClass>org.bimserver.plugins.serializers.MessagingStreamingSerializerPlugin</interfaceClass>
 		<implementationClass>org.bimserver.serializers.binarygeometry.BinaryGeometryMessagingStreamingSerializerPlugin</implementationClass>
+		<name>BinaryGeometryMessagingStreamingSerializer</name>
 		<description>BinaryGeometryMessagingStreamingSerializer</description>
 	</JavaPlugin>
 </PluginDescriptor>
