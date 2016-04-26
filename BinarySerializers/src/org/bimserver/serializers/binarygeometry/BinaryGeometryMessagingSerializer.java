@@ -186,14 +186,16 @@ public class BinaryGeometryMessagingSerializer implements MessagingSerializer {
 			}
 			dataOutputStream.writeByte(messageType.getId());
 			dataOutputStream.writeUTF(ifcProduct.eClass().getName());
+			
 			Long roid = model.getPidRoidMap().get(ifcProduct.getPid());
 			dataOutputStream.writeLong(roid);
+			
 			dataOutputStream.writeLong(ifcProduct.getOid());
 			
 			// BEWARE, ByteOrder is always LITTLE_ENDIAN, because that's what GPU's seem to prefer, Java's ByteBuffer default is BIG_ENDIAN though!
 			
-			int skip = 4 - ((3 + ifcProduct.eClass().getName().getBytes(Charsets.UTF_8).length) % 4);
-			if(skip != 0 && skip != 4) {
+			int skip = 8 - ((3 + ifcProduct.eClass().getName().getBytes(Charsets.UTF_8).length) % 8);
+			if(skip != 0 && skip != 8) {
 				dataOutputStream.write(new byte[skip]);
 			}
 			
