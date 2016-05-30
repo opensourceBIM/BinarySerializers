@@ -44,7 +44,17 @@ import com.google.common.io.LittleEndianDataOutputStream;
 
 public class BinaryGeometryMessagingStreamingSerializer implements MessagingStreamingSerializer {
 	private static final Logger LOGGER = LoggerFactory.getLogger(BinaryGeometryMessagingStreamingSerializer.class);
-	private static final byte FORMAT_VERSION = 7;
+	
+	/*
+	 * Format history (starting at version 8):
+	 * 
+	 * Version 8:
+	 * 	- Using short instead of int for indices. SceneJS was converting the indices to Uint16 anyways, so this saves bytes and a conversion on the client-side
+	 * 
+	 * 
+	 */
+	
+	private static final byte FORMAT_VERSION = 8;
 	
 	private enum Mode {
 		START,
@@ -211,11 +221,11 @@ public class BinaryGeometryMessagingStreamingSerializer implements MessagingStre
 					long splitId = splitCounter--;
 					dataOutputStream.writeLong(splitId);
 					
-					int indexCounter = 0;
+					short indexCounter = 0;
 					int upto = Math.min((part + 1) * maxIndexValues, totalNrIndices);
 					dataOutputStream.writeInt(upto - part * maxIndexValues);
 					for (int i=part * maxIndexValues; i<upto; i++) {
-						dataOutputStream.writeInt(indexCounter++);
+						dataOutputStream.writeShort(indexCounter++);
 					}
 					
 					dataOutputStream.writeInt((upto - part * maxIndexValues) * 3);
@@ -256,10 +266,14 @@ public class BinaryGeometryMessagingStreamingSerializer implements MessagingStre
 				dataOutputStream.write(MessageType.GEOMETRY_TRIANGLES.getId());
 				dataOutputStream.write(new byte[7]);
 				dataOutputStream.writeLong(next.getOid());
-
+				
 				ByteBuffer indicesBuffer = ByteBuffer.wrap(indices);
+				indicesBuffer.order(ByteOrder.LITTLE_ENDIAN);
 				dataOutputStream.writeInt(indicesBuffer.capacity() / 4);
-				dataOutputStream.write(indicesBuffer.array());
+				IntBuffer intBuffer = indicesBuffer.asIntBuffer();
+				for (int i=0; i<intBuffer.capacity(); i++) {
+					dataOutputStream.writeShort((short)intBuffer.get());
+				}
 				
 				ByteBuffer vertexByteBuffer = ByteBuffer.wrap(vertices);
 				dataOutputStream.writeInt(vertexByteBuffer.capacity() / 4);
