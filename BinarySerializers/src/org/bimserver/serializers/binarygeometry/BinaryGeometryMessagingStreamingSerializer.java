@@ -228,6 +228,11 @@ public class BinaryGeometryMessagingStreamingSerializer implements MessagingStre
 						dataOutputStream.writeShort(indexCounter++);
 					}
 					
+					// Aligning to 4-bytes
+					if (upto % 2 != 0) {
+						dataOutputStream.writeShort(0);
+					}
+					
 					dataOutputStream.writeInt((upto - part * maxIndexValues) * 3);
 					for (int i=part * maxIndexValues; i<upto; i+=3) {
 						int oldIndex1 = indicesIntBuffer.get(i);
@@ -273,6 +278,11 @@ public class BinaryGeometryMessagingStreamingSerializer implements MessagingStre
 				IntBuffer intBuffer = indicesBuffer.asIntBuffer();
 				for (int i=0; i<intBuffer.capacity(); i++) {
 					dataOutputStream.writeShort((short)intBuffer.get());
+				}
+
+				// Aligning to 4-bytes
+				if (intBuffer.capacity() % 2 != 0) {
+					dataOutputStream.writeShort(0);
 				}
 				
 				ByteBuffer vertexByteBuffer = ByteBuffer.wrap(vertices);

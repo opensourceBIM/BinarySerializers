@@ -18,4 +18,10 @@
 		<name>BinaryGeometryMessagingStreamingSerializer</name>
 		<description>BinaryGeometryMessagingStreamingSerializer</description>
 	</JavaPlugin>
+	<JavaPlugin>
+		<interfaceClass>org.bimserver.plugins.serializers.MessagingStreamingSerializerPlugin</interfaceClass>
+		<implementationClass>org.bimserver.serializers.binarygeometry.BinaryGeometryMessagingStreamingSerializerPlugin2</implementationClass>
+		<name>BinaryGeometryMessagingStreamingSerializer2</name>
+		<description>BinaryGeometryMessagingStreamingSerializer2</description>
+	</JavaPlugin>
 </PluginDescriptor>
