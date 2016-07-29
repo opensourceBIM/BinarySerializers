@@ -280,7 +280,7 @@ public class BinaryGeometryMessagingStreamingSerializer implements MessagingStre
 					dataOutputStream.writeShort((short)intBuffer.get());
 				}
 
-				// Aligning to 4-bytes
+				// Aligning to 2-bytes
 				if (intBuffer.capacity() % 2 != 0) {
 					dataOutputStream.writeShort(0);
 				}
