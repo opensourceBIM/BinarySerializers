@@ -216,6 +216,8 @@ public class BinaryGeometryMessagingStreamingSerializer2 implements MessagingStr
 		
 		HashMapVirtualObject data = dataList.get(dataOid);
 		if (data != null) {
+			// This geometry info is pointing to a not-yet-sent geometry data, so we send that first
+			// This way the client can be sure that geometry data is always available when geometry info is received, simplifying bookkeeping
 			last = info;
 			EStructuralFeature indicesFeature = data.eClass().getEStructuralFeature("indices");
 			EStructuralFeature verticesFeature = data.eClass().getEStructuralFeature("vertices");
