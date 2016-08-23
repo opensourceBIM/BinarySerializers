@@ -57,11 +57,13 @@ public class BinaryGeometryMessagingStreamingSerializer2 implements MessagingStr
 	 * 
 	 * Version 8:
 	 * 	- Using short instead of int for indices. SceneJS was converting the indices to Uint16 anyways, so this saves bytes and a conversion on the client-side
-	 * 
-	 * 
+	 * Version 9:
+	 *  - Sending the materials/colors for splitted geometry as well, before sending the actual parts
+	 *  - Aligning bytes to 8s instead of 4s when sending splitted geometry
+	 *  - Incrementing splitcounter instead of decrementing (no idea why it was doing that)
 	 */
 	
-	private static final byte FORMAT_VERSION = 8;
+	private static final byte FORMAT_VERSION = 9;
 	
 	private enum Mode {
 		LOAD,
@@ -89,7 +91,7 @@ public class BinaryGeometryMessagingStreamingSerializer2 implements MessagingStr
 	}
 
 	private Mode mode = Mode.LOAD;
-	private long splitCounter = -1;
+	private long splitCounter = 0;
 	private ObjectProvider objectProvider;
 	private ProjectInfo projectInfo;
 	private LittleEndianDataOutputStream dataOutputStream;
@@ -234,7 +236,7 @@ public class BinaryGeometryMessagingStreamingSerializer2 implements MessagingStr
 
 			if (totalNrIndices > maxIndexValues) {
 				dataOutputStream.write(MessageType.GEOMETRY_TRIANGLES_PARTED.getId());
-				dataOutputStream.write(new byte[3]);
+				dataOutputStream.write(new byte[7]);
 				dataOutputStream.writeLong(data.getOid());
 				
 				// Split geometry, this algorithm - for now - just throws away all the reuse of vertices that might be there
@@ -255,9 +257,20 @@ public class BinaryGeometryMessagingStreamingSerializer2 implements MessagingStr
 				ByteBuffer normalsBuffer = ByteBuffer.wrap(normals);
 				normalsBuffer.order(ByteOrder.LITTLE_ENDIAN);
 				FloatBuffer normalsFloatBuffer = normalsBuffer.asFloatBuffer();
+
+				// Only when materials are used we send them
+				if (materials != null) {
+					ByteBuffer materialsByteBuffer = ByteBuffer.wrap(materials);
+					
+					dataOutputStream.writeInt(materialsByteBuffer.capacity() / 4);
+					dataOutputStream.write(materialsByteBuffer.array());
+				} else {
+					// No materials used
+					dataOutputStream.writeInt(0);
+				}
 				
 				for (int part=0; part<nrParts; part++) {
-					long splitId = splitCounter--;
+					long splitId = splitCounter++;
 					dataOutputStream.writeLong(splitId);
 					
 					short indexCounter = 0;
@@ -277,6 +290,7 @@ public class BinaryGeometryMessagingStreamingSerializer2 implements MessagingStr
 						int oldIndex1 = indicesIntBuffer.get(i);
 						int oldIndex2 = indicesIntBuffer.get(i+1);
 						int oldIndex3 = indicesIntBuffer.get(i+2);
+						
 						dataOutputStream.writeFloat(verticesFloatBuffer.get(oldIndex1 * 3));
 						dataOutputStream.writeFloat(verticesFloatBuffer.get(oldIndex1 * 3 + 1));
 						dataOutputStream.writeFloat(verticesFloatBuffer.get(oldIndex1 * 3 + 2));
@@ -303,8 +317,6 @@ public class BinaryGeometryMessagingStreamingSerializer2 implements MessagingStr
 						dataOutputStream.writeFloat(normalsFloatBuffer.get(oldIndex3 * 3 + 1));
 						dataOutputStream.writeFloat(normalsFloatBuffer.get(oldIndex3 * 3 + 2));
 					}
-					
-					dataOutputStream.writeInt(0);
 				}
 			} else {
 				dataOutputStream.write(MessageType.GEOMETRY_TRIANGLES.getId());
