@@ -61,9 +61,11 @@ public class BinaryGeometryMessagingStreamingSerializer2 implements MessagingStr
 	 *  - Sending the materials/colors for splitted geometry as well, before sending the actual parts
 	 *  - Aligning bytes to 8s instead of 4s when sending splitted geometry
 	 *  - Incrementing splitcounter instead of decrementing (no idea why it was doing that)
+	 *  Version 10:
+	 *  - Sending the materials/colors for parts as well again
 	 */
 	
-	private static final byte FORMAT_VERSION = 9;
+	private static final byte FORMAT_VERSION = 10;
 	
 	private enum Mode {
 		LOAD,
@@ -74,8 +76,8 @@ public class BinaryGeometryMessagingStreamingSerializer2 implements MessagingStr
 	
 	private enum MessageType {
 		INIT((byte)0),
-		GEOMETRY_TRIANGLES((byte)1),
 		GEOMETRY_TRIANGLES_PARTED((byte)3),
+		GEOMETRY_TRIANGLES((byte)1),
 		GEOMETRY_INFO((byte)5),
 		END((byte)6);
 		
@@ -258,17 +260,6 @@ public class BinaryGeometryMessagingStreamingSerializer2 implements MessagingStr
 				normalsBuffer.order(ByteOrder.LITTLE_ENDIAN);
 				FloatBuffer normalsFloatBuffer = normalsBuffer.asFloatBuffer();
 
-				// Only when materials are used we send them
-				if (materials != null) {
-					ByteBuffer materialsByteBuffer = ByteBuffer.wrap(materials);
-					
-					dataOutputStream.writeInt(materialsByteBuffer.capacity() / 4);
-					dataOutputStream.write(materialsByteBuffer.array());
-				} else {
-					// No materials used
-					dataOutputStream.writeInt(0);
-				}
-				
 				for (int part=0; part<nrParts; part++) {
 					long splitId = splitCounter++;
 					dataOutputStream.writeLong(splitId);
@@ -285,7 +276,8 @@ public class BinaryGeometryMessagingStreamingSerializer2 implements MessagingStr
 						dataOutputStream.writeShort(0);
 					}
 					
-					dataOutputStream.writeInt((upto - part * maxIndexValues) * 3);
+					int nrVertices = (upto - part * maxIndexValues) * 3;
+					dataOutputStream.writeInt(nrVertices);
 					for (int i=part * maxIndexValues; i<upto; i+=3) {
 						int oldIndex1 = indicesIntBuffer.get(i);
 						int oldIndex2 = indicesIntBuffer.get(i+1);
@@ -301,7 +293,7 @@ public class BinaryGeometryMessagingStreamingSerializer2 implements MessagingStr
 						dataOutputStream.writeFloat(verticesFloatBuffer.get(oldIndex3 * 3 + 1));
 						dataOutputStream.writeFloat(verticesFloatBuffer.get(oldIndex3 * 3 + 2));
 					}
-					dataOutputStream.writeInt((upto - part * maxIndexValues) * 3);
+					dataOutputStream.writeInt(nrVertices);
 					for (int i=part * maxIndexValues; i<upto; i+=3) {
 						int oldIndex1 = indicesIntBuffer.get(i);
 						int oldIndex2 = indicesIntBuffer.get(i+1);
@@ -316,6 +308,35 @@ public class BinaryGeometryMessagingStreamingSerializer2 implements MessagingStr
 						dataOutputStream.writeFloat(normalsFloatBuffer.get(oldIndex3 * 3));
 						dataOutputStream.writeFloat(normalsFloatBuffer.get(oldIndex3 * 3 + 1));
 						dataOutputStream.writeFloat(normalsFloatBuffer.get(oldIndex3 * 3 + 2));
+					}
+					// Only when materials are used we send them
+					if (materials != null) {
+						ByteBuffer materialsByteBuffer = ByteBuffer.wrap(materials);
+						materialsByteBuffer.order(ByteOrder.LITTLE_ENDIAN);
+						FloatBuffer materialsFloatBuffer = materialsByteBuffer.asFloatBuffer();
+
+						dataOutputStream.writeInt(nrVertices * 4 / 3);
+						for (int i=part * maxIndexValues; i<upto; i+=3) {
+							int oldIndex1 = indicesIntBuffer.get(i);
+							int oldIndex2 = indicesIntBuffer.get(i+1);
+							int oldIndex3 = indicesIntBuffer.get(i+2);
+
+							dataOutputStream.writeFloat(materialsFloatBuffer.get(oldIndex1 * 4));
+							dataOutputStream.writeFloat(materialsFloatBuffer.get(oldIndex1 * 4 + 1));
+							dataOutputStream.writeFloat(materialsFloatBuffer.get(oldIndex1 * 4 + 2));
+							dataOutputStream.writeFloat(materialsFloatBuffer.get(oldIndex1 * 4 + 3));
+							dataOutputStream.writeFloat(materialsFloatBuffer.get(oldIndex2 * 4));
+							dataOutputStream.writeFloat(materialsFloatBuffer.get(oldIndex2 * 4 + 1));
+							dataOutputStream.writeFloat(materialsFloatBuffer.get(oldIndex2 * 4 + 2));
+							dataOutputStream.writeFloat(materialsFloatBuffer.get(oldIndex2 * 4 + 3));
+							dataOutputStream.writeFloat(materialsFloatBuffer.get(oldIndex3 * 4));
+							dataOutputStream.writeFloat(materialsFloatBuffer.get(oldIndex3 * 4 + 1));
+							dataOutputStream.writeFloat(materialsFloatBuffer.get(oldIndex3 * 4 + 2));
+							dataOutputStream.writeFloat(materialsFloatBuffer.get(oldIndex3 * 4 + 3));
+						}
+					} else {
+						// No materials used
+						dataOutputStream.writeInt(0);
 					}
 				}
 			} else {
