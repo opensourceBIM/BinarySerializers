@@ -21,8 +21,6 @@ import java.io.IOException;
 import java.io.OutputStream;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
-import java.nio.FloatBuffer;
-import java.nio.IntBuffer;
 
 import org.bimserver.BimserverDatabaseException;
 import org.bimserver.emf.PackageMetaData;
@@ -81,7 +79,6 @@ public class BinaryGeometryMessagingStreamingSerializer implements MessagingStre
 	}
 
 	private Mode mode = Mode.START;
-	private long splitCounter = -1;
 	private ObjectProvider objectProvider;
 	private HashMapVirtualObject next;
 	private ProjectInfo projectInfo;
