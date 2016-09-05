@@ -190,119 +190,32 @@ public class BinaryGeometryMessagingStreamingSerializer implements MessagingStre
 			byte[] normals = (byte[])next.eGet(normalsFeature);
 			byte[] materials = (byte[])next.eGet(materialsFeature);
 
-			int totalNrIndices = indices.length / 4;
-			int maxIndexValues = 16389;
+			dataOutputStream.write(MessageType.GEOMETRY_TRIANGLES.getId());
+			dataOutputStream.write(new byte[7]);
+			dataOutputStream.writeLong(next.getOid());
+			
+			ByteBuffer indicesBuffer = ByteBuffer.wrap(indices);
+			indicesBuffer.order(ByteOrder.LITTLE_ENDIAN);
+			dataOutputStream.writeInt(indicesBuffer.capacity() / 4);
+			dataOutputStream.write(indicesBuffer.array());
 
-			if (totalNrIndices > maxIndexValues) {
-				dataOutputStream.write(MessageType.GEOMETRY_TRIANGLES_PARTED.getId());
-				dataOutputStream.write(new byte[3]);
-				dataOutputStream.writeLong(next.getOid());
+			ByteBuffer vertexByteBuffer = ByteBuffer.wrap(vertices);
+			dataOutputStream.writeInt(vertexByteBuffer.capacity() / 4);
+			dataOutputStream.write(vertexByteBuffer.array());
+			
+			ByteBuffer normalsBuffer = ByteBuffer.wrap(normals);
+			dataOutputStream.writeInt(normalsBuffer.capacity() / 4);
+			dataOutputStream.write(normalsBuffer.array());
+			
+			// Only when materials are used we send them
+			if (materials != null) {
+				ByteBuffer materialsByteBuffer = ByteBuffer.wrap(materials);
 				
-				// Split geometry, this algorithm - for now - just throws away all the reuse of vertices that might be there
-				// Also, although usually the vertices buffers are too large, this algorithm is based on the indices, so we
-				// probably are not cramming as much data as we can in each "part", but that's not really a problem I think
-
-				int nrParts = (totalNrIndices + maxIndexValues - 1) / maxIndexValues;
-				dataOutputStream.writeInt(nrParts);
-
-				ByteBuffer indicesBuffer = ByteBuffer.wrap(indices);
-				indicesBuffer.order(ByteOrder.LITTLE_ENDIAN);
-				IntBuffer indicesIntBuffer = indicesBuffer.asIntBuffer();
-
-				ByteBuffer vertexBuffer = ByteBuffer.wrap(vertices);
-				vertexBuffer.order(ByteOrder.LITTLE_ENDIAN);
-				FloatBuffer verticesFloatBuffer = vertexBuffer.asFloatBuffer();
-				
-				ByteBuffer normalsBuffer = ByteBuffer.wrap(normals);
-				normalsBuffer.order(ByteOrder.LITTLE_ENDIAN);
-				FloatBuffer normalsFloatBuffer = normalsBuffer.asFloatBuffer();
-				
-				for (int part=0; part<nrParts; part++) {
-					long splitId = splitCounter--;
-					dataOutputStream.writeLong(splitId);
-					
-					short indexCounter = 0;
-					int upto = Math.min((part + 1) * maxIndexValues, totalNrIndices);
-					dataOutputStream.writeInt(upto - part * maxIndexValues);
-					for (int i=part * maxIndexValues; i<upto; i++) {
-						dataOutputStream.writeShort(indexCounter++);
-					}
-					
-					// Aligning to 4-bytes
-					if (upto % 2 != 0) {
-						dataOutputStream.writeShort(0);
-					}
-					
-					dataOutputStream.writeInt((upto - part * maxIndexValues) * 3);
-					for (int i=part * maxIndexValues; i<upto; i+=3) {
-						int oldIndex1 = indicesIntBuffer.get(i);
-						int oldIndex2 = indicesIntBuffer.get(i+1);
-						int oldIndex3 = indicesIntBuffer.get(i+2);
-						dataOutputStream.writeFloat(verticesFloatBuffer.get(oldIndex1 * 3));
-						dataOutputStream.writeFloat(verticesFloatBuffer.get(oldIndex1 * 3 + 1));
-						dataOutputStream.writeFloat(verticesFloatBuffer.get(oldIndex1 * 3 + 2));
-						dataOutputStream.writeFloat(verticesFloatBuffer.get(oldIndex2 * 3));
-						dataOutputStream.writeFloat(verticesFloatBuffer.get(oldIndex2 * 3 + 1));
-						dataOutputStream.writeFloat(verticesFloatBuffer.get(oldIndex2 * 3 + 2));
-						dataOutputStream.writeFloat(verticesFloatBuffer.get(oldIndex3 * 3));
-						dataOutputStream.writeFloat(verticesFloatBuffer.get(oldIndex3 * 3 + 1));
-						dataOutputStream.writeFloat(verticesFloatBuffer.get(oldIndex3 * 3 + 2));
-					}
-					dataOutputStream.writeInt((upto - part * maxIndexValues) * 3);
-					for (int i=part * maxIndexValues; i<upto; i+=3) {
-						int oldIndex1 = indicesIntBuffer.get(i);
-						int oldIndex2 = indicesIntBuffer.get(i+1);
-						int oldIndex3 = indicesIntBuffer.get(i+2);
-						
-						dataOutputStream.writeFloat(normalsFloatBuffer.get(oldIndex1 * 3));
-						dataOutputStream.writeFloat(normalsFloatBuffer.get(oldIndex1 * 3 + 1));
-						dataOutputStream.writeFloat(normalsFloatBuffer.get(oldIndex1 * 3 + 2));
-						dataOutputStream.writeFloat(normalsFloatBuffer.get(oldIndex2 * 3));
-						dataOutputStream.writeFloat(normalsFloatBuffer.get(oldIndex2 * 3 + 1));
-						dataOutputStream.writeFloat(normalsFloatBuffer.get(oldIndex2 * 3 + 2));
-						dataOutputStream.writeFloat(normalsFloatBuffer.get(oldIndex3 * 3));
-						dataOutputStream.writeFloat(normalsFloatBuffer.get(oldIndex3 * 3 + 1));
-						dataOutputStream.writeFloat(normalsFloatBuffer.get(oldIndex3 * 3 + 2));
-					}
-					
-					dataOutputStream.writeInt(0);
-				}
+				dataOutputStream.writeInt(materialsByteBuffer.capacity() / 4);
+				dataOutputStream.write(materialsByteBuffer.array());
 			} else {
-				dataOutputStream.write(MessageType.GEOMETRY_TRIANGLES.getId());
-				dataOutputStream.write(new byte[7]);
-				dataOutputStream.writeLong(next.getOid());
-				
-				ByteBuffer indicesBuffer = ByteBuffer.wrap(indices);
-				indicesBuffer.order(ByteOrder.LITTLE_ENDIAN);
-				dataOutputStream.writeInt(indicesBuffer.capacity() / 4);
-				IntBuffer intBuffer = indicesBuffer.asIntBuffer();
-				for (int i=0; i<intBuffer.capacity(); i++) {
-					dataOutputStream.writeShort((short)intBuffer.get());
-				}
-
-				// Aligning to 2-bytes
-				if (intBuffer.capacity() % 2 != 0) {
-					dataOutputStream.writeShort(0);
-				}
-				
-				ByteBuffer vertexByteBuffer = ByteBuffer.wrap(vertices);
-				dataOutputStream.writeInt(vertexByteBuffer.capacity() / 4);
-				dataOutputStream.write(vertexByteBuffer.array());
-				
-				ByteBuffer normalsBuffer = ByteBuffer.wrap(normals);
-				dataOutputStream.writeInt(normalsBuffer.capacity() / 4);
-				dataOutputStream.write(normalsBuffer.array());
-				
-				// Only when materials are used we send them
-				if (materials != null) {
-					ByteBuffer materialsByteBuffer = ByteBuffer.wrap(materials);
-					
-					dataOutputStream.writeInt(materialsByteBuffer.capacity() / 4);
-					dataOutputStream.write(materialsByteBuffer.array());
-				} else {
-					// No materials used
-					dataOutputStream.writeInt(0);
-				}
+				// No materials used
+				dataOutputStream.writeInt(0);
 			}
 		} else {
 			LOGGER.info("Ignoring");
