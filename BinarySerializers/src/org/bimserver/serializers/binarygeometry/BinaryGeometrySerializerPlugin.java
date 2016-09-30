@@ -20,6 +20,7 @@ package org.bimserver.serializers.binarygeometry;
 import java.util.Set;
 
 import org.bimserver.emf.Schema;
+import org.bimserver.interfaces.objects.SPluginType;
 import org.bimserver.plugins.PluginConfiguration;
 import org.bimserver.plugins.PluginContext;
 import org.bimserver.plugins.serializers.AbstractSerializerPlugin;
@@ -51,5 +52,10 @@ public class BinaryGeometrySerializerPlugin extends AbstractSerializerPlugin {
 	@Override
 	public Set<Schema> getSupportedSchemas() {
 		return Schema.asSet(Schema.IFC2X3TC1, Schema.IFC4);
+	}
+
+	@Override
+	public String getOutputFormat(Schema schema) {
+		return "BINARY_GEOMETRY_6";
 	}
 }

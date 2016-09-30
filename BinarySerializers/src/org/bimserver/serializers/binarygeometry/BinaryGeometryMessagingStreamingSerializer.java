@@ -63,7 +63,6 @@ public class BinaryGeometryMessagingStreamingSerializer implements MessagingStre
 	private enum MessageType {
 		INIT((byte)0),
 		GEOMETRY_TRIANGLES((byte)1),
-		GEOMETRY_TRIANGLES_PARTED((byte)3),
 		GEOMETRY_INFO((byte)5),
 		END((byte)6);
 		
@@ -190,6 +189,7 @@ public class BinaryGeometryMessagingStreamingSerializer implements MessagingStre
 			dataOutputStream.write(MessageType.GEOMETRY_TRIANGLES.getId());
 			dataOutputStream.write(new byte[7]);
 			dataOutputStream.writeLong(next.getOid());
+			System.out.println(next.getOid());
 			
 			ByteBuffer indicesBuffer = ByteBuffer.wrap(indices);
 			indicesBuffer.order(ByteOrder.LITTLE_ENDIAN);
