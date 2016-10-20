@@ -189,7 +189,6 @@ public class BinaryGeometryMessagingStreamingSerializer implements MessagingStre
 			dataOutputStream.write(MessageType.GEOMETRY_TRIANGLES.getId());
 			dataOutputStream.write(new byte[7]);
 			dataOutputStream.writeLong(next.getOid());
-			System.out.println(next.getOid());
 			
 			ByteBuffer indicesBuffer = ByteBuffer.wrap(indices);
 			indicesBuffer.order(ByteOrder.LITTLE_ENDIAN);
