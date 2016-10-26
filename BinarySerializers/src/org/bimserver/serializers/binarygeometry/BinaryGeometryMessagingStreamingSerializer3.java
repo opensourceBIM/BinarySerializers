@@ -26,12 +26,10 @@ import java.nio.IntBuffer;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
-import java.util.HashMap;
-import java.util.Iterator;
 import java.util.List;
-import java.util.Map;
 
 import org.bimserver.BimserverDatabaseException;
+import org.bimserver.database.queries.om.QueryException;
 import org.bimserver.emf.PackageMetaData;
 import org.bimserver.interfaces.objects.SVector3f;
 import org.bimserver.models.geometry.GeometryPackage;
@@ -45,12 +43,13 @@ import org.bimserver.plugins.serializers.ProjectInfo;
 import org.bimserver.plugins.serializers.SerializerException;
 import org.bimserver.shared.HashMapVirtualObject;
 import org.bimserver.shared.HashMapWrappedVirtualObject;
+import org.eclipse.emf.ecore.EClass;
 import org.eclipse.emf.ecore.EStructuralFeature;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-public class BinaryGeometryMessagingStreamingSerializer2 implements MessagingStreamingSerializer {
-	private static final Logger LOGGER = LoggerFactory.getLogger(BinaryGeometryMessagingStreamingSerializer2.class);
+public class BinaryGeometryMessagingStreamingSerializer3 implements MessagingStreamingSerializer {
+	private static final Logger LOGGER = LoggerFactory.getLogger(BinaryGeometryMessagingStreamingSerializer3.class);
 	
 	/*
 	 * Format history (starting at version 8):
@@ -96,6 +95,11 @@ public class BinaryGeometryMessagingStreamingSerializer2 implements MessagingStr
 	private long splitCounter = 0;
 	private ObjectProvider objectProvider;
 	private ProjectInfo projectInfo;
+	private SerializerDataOutputStream serializerDataOutputStream;
+	private HashMapVirtualObject next;
+	private ProgressReporter progressReporter;
+	private int nrObjectsWritten;
+	private int size;
 	
 	@Override
 	public void init(ObjectProvider objectProvider, ProjectInfo projectInfo, PluginManagerInterface pluginManager, PackageMetaData packageMetaData) throws SerializerException {
@@ -105,6 +109,7 @@ public class BinaryGeometryMessagingStreamingSerializer2 implements MessagingStr
 
 	@Override
 	public boolean writeMessage(OutputStream outputStream, ProgressReporter progressReporter) throws IOException, SerializerException {
+		this.progressReporter = progressReporter;
 		serializerDataOutputStream = null;
 		if (outputStream instanceof SerializerDataOutputStream) {
 			serializerDataOutputStream = (SerializerDataOutputStream)outputStream;
@@ -135,52 +140,35 @@ public class BinaryGeometryMessagingStreamingSerializer2 implements MessagingStr
 		return true;
 	}
 
-	private final List<HashMapVirtualObject> infoList = new ArrayList<>();
-	private final Map<Long, HashMapVirtualObject> dataList = new HashMap<>();
-
-	private Iterator<HashMapVirtualObject> iterator;
-	
 	private void load() throws SerializerException {
+		long start = System.nanoTime();
+		size = 0;
 		HashMapVirtualObject next = null;
 		try {
 			next = objectProvider.next();
+		while (next != null) {
+			if (next.eClass() == GeometryPackage.eINSTANCE.getGeometryInfo()) {
+				size++;
+			}
+			next = objectProvider.next();
+		}
 		} catch (BimserverDatabaseException e) {
 			throw new SerializerException(e);
 		}
-		while (next != null) {
-			if (next.eClass() == GeometryPackage.eINSTANCE.getGeometryInfo()) {
-				infoList.add(next);
-			} else if (next.eClass() == GeometryPackage.eINSTANCE.getGeometryData()) {
-				dataList.put(next.getOid(), next);
-			}
-			try {
-				next = objectProvider.next();
-			} catch (BimserverDatabaseException e) {
-				throw new SerializerException(e);
-			}
+		try {
+			objectProvider = objectProvider.copy();
+			this.next = objectProvider.next();
+		} catch (IOException e) {
+			e.printStackTrace();
+		} catch (QueryException e) {
+			e.printStackTrace();
+		} catch (BimserverDatabaseException e) {
+			e.printStackTrace();
 		}
-		Collections.sort(infoList, new Comparator<HashMapVirtualObject>(){
-			@Override
-			public int compare(HashMapVirtualObject o1, HashMapVirtualObject o2) {
-				return getBoundingBoxVolume(o2)  - getBoundingBoxVolume(o1);
-			}});
-		
-		iterator = infoList.iterator();
+		long end = System.nanoTime();
+		System.out.println(((end - start) / 1000000) + " ms prepare time");
 	}
 	
-	private int getBoundingBoxVolume(HashMapVirtualObject o1) {
-		HashMapWrappedVirtualObject minBounds = (HashMapWrappedVirtualObject) o1.eGet(o1.eClass().getEStructuralFeature("minBounds"));
-		HashMapWrappedVirtualObject maxBounds = (HashMapWrappedVirtualObject) o1.eGet(o1.eClass().getEStructuralFeature("maxBounds"));
-		Double minX = (Double) minBounds.eGet("x");
-		Double minY = (Double) minBounds.eGet("y");
-		Double minZ = (Double) minBounds.eGet("z");
-		Double maxX = (Double) maxBounds.eGet("x");
-		Double maxY = (Double) maxBounds.eGet("y");
-		Double maxZ = (Double) maxBounds.eGet("z");
-		int volume = (int) ((maxX - minX) * (maxY - minY) * (maxZ - minZ));
-		return volume;
-	}
-
 	private boolean writeEnd() throws IOException {
 		serializerDataOutputStream.write(MessageType.END.getId());
 		return true;
@@ -208,27 +196,45 @@ public class BinaryGeometryMessagingStreamingSerializer2 implements MessagingStr
 		serializerDataOutputStream.writeDouble(maxBounds.getY());
 		serializerDataOutputStream.writeDouble(maxBounds.getZ());
 	}
-	
-	HashMapVirtualObject last = null;
 
-	private SerializerDataOutputStream serializerDataOutputStream;
-	
 	private boolean writeData() throws IOException, SerializerException {
-		HashMapVirtualObject info = null;
-		if (last != null) {
-			info = last;
-			last = null;
-		} else {
-			info = iterator.next();
+		if (next == null) {
+			return false;
 		}
-		Object transformation = info.eGet(info.eClass().getEStructuralFeature("transformation"));
-		Object dataOid = info.eGet(info.eClass().getEStructuralFeature("data"));
-		
-		HashMapVirtualObject data = dataList.get(dataOid);
-		if (data != null) {
+		if (GeometryPackage.eINSTANCE.getGeometryInfo() == next.eClass()) {
+			HashMapVirtualObject info = next;
+			Object transformation = info.eGet(info.eClass().getEStructuralFeature("transformation"));
+			Object dataOid = info.eGet(info.eClass().getEStructuralFeature("data"));
+			
+			serializerDataOutputStream.writeByte(MessageType.GEOMETRY_INFO.getId());
+			serializerDataOutputStream.write(new byte[7]);
+			serializerDataOutputStream.writeLong(info.getRoid());
+			serializerDataOutputStream.writeLong(info.getOid());
+			HashMapWrappedVirtualObject minBounds = (HashMapWrappedVirtualObject) info.eGet(info.eClass().getEStructuralFeature("minBounds"));
+			HashMapWrappedVirtualObject maxBounds = (HashMapWrappedVirtualObject) info.eGet(info.eClass().getEStructuralFeature("maxBounds"));
+			Double minX = (Double) minBounds.eGet("x");
+			Double minY = (Double) minBounds.eGet("y");
+			Double minZ = (Double) minBounds.eGet("z");
+			Double maxX = (Double) maxBounds.eGet("x");
+			Double maxY = (Double) maxBounds.eGet("y");
+			Double maxZ = (Double) maxBounds.eGet("z");
+			serializerDataOutputStream.writeDouble(minX);
+			serializerDataOutputStream.writeDouble(minY);
+			serializerDataOutputStream.writeDouble(minZ);
+			serializerDataOutputStream.writeDouble(maxX);
+			serializerDataOutputStream.writeDouble(maxY);
+			serializerDataOutputStream.writeDouble(maxZ);
+			serializerDataOutputStream.write((byte[])transformation);
+			serializerDataOutputStream.writeLong((Long)dataOid);
+			
+			nrObjectsWritten++;
+			if (progressReporter != null) {
+				progressReporter.update(nrObjectsWritten, size);
+			}
+		} else if (GeometryPackage.eINSTANCE.getGeometryData() == next.eClass()) {
+			HashMapVirtualObject data = next;
 			// This geometry info is pointing to a not-yet-sent geometry data, so we send that first
 			// This way the client can be sure that geometry data is always available when geometry info is received, simplifying bookkeeping
-			last = info;
 			EStructuralFeature indicesFeature = data.eClass().getEStructuralFeature("indices");
 			EStructuralFeature verticesFeature = data.eClass().getEStructuralFeature("vertices");
 			EStructuralFeature normalsFeature = data.eClass().getEStructuralFeature("normals");
@@ -382,31 +388,12 @@ public class BinaryGeometryMessagingStreamingSerializer2 implements MessagingStr
 					serializerDataOutputStream.writeInt(0);
 				}
 			}
-			dataList.remove(dataOid);
-			return true;
 		}
-		
-		serializerDataOutputStream.writeByte(MessageType.GEOMETRY_INFO.getId());
-		serializerDataOutputStream.write(new byte[7]);
-		serializerDataOutputStream.writeLong(info.getRoid());
-		serializerDataOutputStream.writeLong(info.getOid());
-		HashMapWrappedVirtualObject minBounds = (HashMapWrappedVirtualObject) info.eGet(info.eClass().getEStructuralFeature("minBounds"));
-		HashMapWrappedVirtualObject maxBounds = (HashMapWrappedVirtualObject) info.eGet(info.eClass().getEStructuralFeature("maxBounds"));
-		Double minX = (Double) minBounds.eGet("x");
-		Double minY = (Double) minBounds.eGet("y");
-		Double minZ = (Double) minBounds.eGet("z");
-		Double maxX = (Double) maxBounds.eGet("x");
-		Double maxY = (Double) maxBounds.eGet("y");
-		Double maxZ = (Double) maxBounds.eGet("z");
-		serializerDataOutputStream.writeDouble(minX);
-		serializerDataOutputStream.writeDouble(minY);
-		serializerDataOutputStream.writeDouble(minZ);
-		serializerDataOutputStream.writeDouble(maxX);
-		serializerDataOutputStream.writeDouble(maxY);
-		serializerDataOutputStream.writeDouble(maxZ);
-		serializerDataOutputStream.write((byte[])transformation);
-		serializerDataOutputStream.writeLong((Long)dataOid);
-		
-		return iterator.hasNext();
+		try {
+			next = objectProvider.next();
+		} catch (BimserverDatabaseException e) {
+			e.printStackTrace();
+		}
+		return next != null;
 	}
 }
