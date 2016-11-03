@@ -115,6 +115,7 @@ public class BinaryGeometryMessagingStreamingSerializer3 implements MessagingStr
 		case LOAD: {
 			load();
 			mode = Mode.START;
+			// Explicitly no break here, move on to start right away
 		}
 		case START:
 			writeStart();
