@@ -20,7 +20,6 @@ package org.bimserver.serializers.binarygeometry;
 import java.util.Set;
 
 import org.bimserver.emf.Schema;
-import org.bimserver.interfaces.objects.SPluginType;
 import org.bimserver.plugins.PluginConfiguration;
 import org.bimserver.plugins.PluginContext;
 import org.bimserver.plugins.serializers.AbstractSerializerPlugin;
