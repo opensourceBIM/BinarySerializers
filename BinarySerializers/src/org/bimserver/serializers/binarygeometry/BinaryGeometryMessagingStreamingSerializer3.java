@@ -137,7 +137,7 @@ public class BinaryGeometryMessagingStreamingSerializer3 implements MessagingStr
 	}
 
 	private void load() throws SerializerException {
-		long start = System.nanoTime();
+//		long start = System.nanoTime();
 		size = 0;
 		HashMapVirtualObject next = null;
 		try {
@@ -161,8 +161,8 @@ public class BinaryGeometryMessagingStreamingSerializer3 implements MessagingStr
 		} catch (BimserverDatabaseException e) {
 			e.printStackTrace();
 		}
-		long end = System.nanoTime();
-		System.out.println(((end - start) / 1000000) + " ms prepare time");
+//		long end = System.nanoTime();
+//		System.out.println(((end - start) / 1000000) + " ms prepare time");
 	}
 	
 	private boolean writeEnd() throws IOException {
