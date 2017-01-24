@@ -46,11 +46,8 @@ import org.bimserver.plugins.serializers.SerializerException;
 import org.bimserver.shared.HashMapVirtualObject;
 import org.bimserver.shared.HashMapWrappedVirtualObject;
 import org.eclipse.emf.ecore.EStructuralFeature;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 public class BinaryGeometryMessagingStreamingSerializer2 implements MessagingStreamingSerializer {
-	private static final Logger LOGGER = LoggerFactory.getLogger(BinaryGeometryMessagingStreamingSerializer2.class);
 	
 	/*
 	 * Format history (starting at version 8):
