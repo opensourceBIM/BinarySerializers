@@ -46,8 +46,11 @@ import org.bimserver.plugins.serializers.SerializerException;
 import org.bimserver.shared.HashMapVirtualObject;
 import org.bimserver.shared.HashMapWrappedVirtualObject;
 import org.eclipse.emf.ecore.EStructuralFeature;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 public class BinaryGeometryMessagingStreamingSerializer2 implements MessagingStreamingSerializer {
+	private static final Logger LOGGER = LoggerFactory.getLogger(BinaryGeometryMessagingStreamingSerializer2.class);
 	
 	/*
 	 * Format history (starting at version 8):
@@ -197,10 +200,12 @@ public class BinaryGeometryMessagingStreamingSerializer2 implements MessagingStr
 		}
 
 		SVector3f minBounds = projectInfo.getMinBounds();
+		LOGGER.info(minBounds.getX() + ", " + minBounds.getY() + ", " + minBounds.getZ());
 		serializerDataOutputStream.writeDouble(minBounds.getX());
 		serializerDataOutputStream.writeDouble(minBounds.getY());
 		serializerDataOutputStream.writeDouble(minBounds.getZ());
 		SVector3f maxBounds = projectInfo.getMaxBounds();
+		LOGGER.info(maxBounds.getX() + ", " + maxBounds.getY() + ", " + maxBounds.getZ());
 		serializerDataOutputStream.writeDouble(maxBounds.getX());
 		serializerDataOutputStream.writeDouble(maxBounds.getY());
 		serializerDataOutputStream.writeDouble(maxBounds.getZ());

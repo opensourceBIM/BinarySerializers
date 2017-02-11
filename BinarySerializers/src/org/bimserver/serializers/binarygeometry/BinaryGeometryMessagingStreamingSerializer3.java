@@ -40,9 +40,12 @@ import org.bimserver.plugins.serializers.SerializerException;
 import org.bimserver.shared.HashMapVirtualObject;
 import org.bimserver.shared.HashMapWrappedVirtualObject;
 import org.eclipse.emf.ecore.EStructuralFeature;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 public class BinaryGeometryMessagingStreamingSerializer3 implements MessagingStreamingSerializer {
-	
+	private static final Logger LOGGER = LoggerFactory.getLogger(BinaryGeometryMessagingStreamingSerializer3.class);
+
 	/*
 	 * Format history (starting at version 8):
 	 * 
@@ -57,6 +60,7 @@ public class BinaryGeometryMessagingStreamingSerializer3 implements MessagingStr
 	 */
 	
 	private static final byte FORMAT_VERSION = 10;
+	private boolean splitGeometry = true;
 	
 	private enum Mode {
 		LOAD,
@@ -133,6 +137,10 @@ public class BinaryGeometryMessagingStreamingSerializer3 implements MessagingStr
 		return true;
 	}
 
+	public void setSplitGeometry(boolean splitGeometry) {
+		this.splitGeometry = splitGeometry;
+	}
+	
 	private void load() throws SerializerException {
 //		long start = System.nanoTime();
 		size = 0;
@@ -181,10 +189,12 @@ public class BinaryGeometryMessagingStreamingSerializer3 implements MessagingStr
 		}
 
 		SVector3f minBounds = projectInfo.getMinBounds();
+		LOGGER.info(minBounds.getX() + ", " + minBounds.getY() + ", " + minBounds.getZ());
 		serializerDataOutputStream.writeDouble(minBounds.getX());
 		serializerDataOutputStream.writeDouble(minBounds.getY());
 		serializerDataOutputStream.writeDouble(minBounds.getZ());
 		SVector3f maxBounds = projectInfo.getMaxBounds();
+		LOGGER.info(maxBounds.getX() + ", " + maxBounds.getY() + ", " + maxBounds.getZ());
 		serializerDataOutputStream.writeDouble(maxBounds.getX());
 		serializerDataOutputStream.writeDouble(maxBounds.getY());
 		serializerDataOutputStream.writeDouble(maxBounds.getZ());
@@ -211,6 +221,7 @@ public class BinaryGeometryMessagingStreamingSerializer3 implements MessagingStr
 			Double maxX = (Double) maxBounds.eGet("x");
 			Double maxY = (Double) maxBounds.eGet("y");
 			Double maxZ = (Double) maxBounds.eGet("z");
+			
 			serializerDataOutputStream.writeDouble(minX);
 			serializerDataOutputStream.writeDouble(minY);
 			serializerDataOutputStream.writeDouble(minZ);
