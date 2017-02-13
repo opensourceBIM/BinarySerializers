@@ -189,12 +189,10 @@ public class BinaryGeometryMessagingStreamingSerializer3 implements MessagingStr
 		}
 
 		SVector3f minBounds = projectInfo.getMinBounds();
-		LOGGER.info(minBounds.getX() + ", " + minBounds.getY() + ", " + minBounds.getZ());
 		serializerDataOutputStream.writeDouble(minBounds.getX());
 		serializerDataOutputStream.writeDouble(minBounds.getY());
 		serializerDataOutputStream.writeDouble(minBounds.getZ());
 		SVector3f maxBounds = projectInfo.getMaxBounds();
-		LOGGER.info(maxBounds.getX() + ", " + maxBounds.getY() + ", " + maxBounds.getZ());
 		serializerDataOutputStream.writeDouble(maxBounds.getX());
 		serializerDataOutputStream.writeDouble(maxBounds.getY());
 		serializerDataOutputStream.writeDouble(maxBounds.getZ());
