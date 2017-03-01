@@ -2,7 +2,7 @@
 	<modelVersion>4.0.0</modelVersion>
 	<groupId>org.opensourcebim</groupId>
 	<artifactId>binaryserializers</artifactId>
-	<version>0.0.23</version>
+	<version>0.0.24-SNAPSHOT</version>
 	<properties>
 		<timestamp>${maven.build.timestamp}</timestamp>
 		<maven.build.timestamp.format>yyyy-MM-dd'T'HH:mm:ssZ</maven.build.timestamp.format>
@@ -167,7 +167,7 @@
 		<url>https://github.com/opensourceBIM/BinarySerializers.git</url>
 		<connection>scm:git:https://github.com/opensourceBIM/BinarySerializers.git</connection>
 		<developerConnection>scm:git:https://github.com/opensourceBIM/BinarySerializers.git</developerConnection>
-		<tag>binaryserializers-0.0.23</tag>
+		<tag>binaryserializers-0.0.13</tag>
 	</scm>
 	<organization>
 		<name>OpenSource BIM</name>
