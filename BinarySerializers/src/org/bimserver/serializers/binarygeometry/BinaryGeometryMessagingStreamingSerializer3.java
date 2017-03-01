@@ -250,104 +250,142 @@ public class BinaryGeometryMessagingStreamingSerializer3 implements MessagingStr
 			int totalNrIndices = indices.length / 4;
 			int maxIndexValues = 16389;
 
-			if (totalNrIndices > maxIndexValues) {
-				serializerDataOutputStream.write(MessageType.GEOMETRY_TRIANGLES_PARTED.getId());
-				serializerDataOutputStream.write(new byte[7]);
-				serializerDataOutputStream.writeLong(data.getOid());
-				
-				// Split geometry, this algorithm - for now - just throws away all the reuse of vertices that might be there
-				// Also, although usually the vertices buffers are too large, this algorithm is based on the indices, so we
-				// probably are not cramming as much data as we can in each "part", but that's not really a problem I think
-
-				int nrParts = (totalNrIndices + maxIndexValues - 1) / maxIndexValues;
-				serializerDataOutputStream.writeInt(nrParts);
-
-				ByteBuffer indicesBuffer = ByteBuffer.wrap(indices);
-				indicesBuffer.order(ByteOrder.LITTLE_ENDIAN);
-				IntBuffer indicesIntBuffer = indicesBuffer.asIntBuffer();
-
-				ByteBuffer vertexBuffer = ByteBuffer.wrap(vertices);
-				vertexBuffer.order(ByteOrder.LITTLE_ENDIAN);
-				FloatBuffer verticesFloatBuffer = vertexBuffer.asFloatBuffer();
-				
-				ByteBuffer normalsBuffer = ByteBuffer.wrap(normals);
-				normalsBuffer.order(ByteOrder.LITTLE_ENDIAN);
-				FloatBuffer normalsFloatBuffer = normalsBuffer.asFloatBuffer();
-
-				for (int part=0; part<nrParts; part++) {
-					long splitId = splitCounter++;
-					serializerDataOutputStream.writeLong(splitId);
+			if (splitGeometry) {
+				if (totalNrIndices > maxIndexValues) {
+					serializerDataOutputStream.write(MessageType.GEOMETRY_TRIANGLES_PARTED.getId());
+					serializerDataOutputStream.write(new byte[7]);
+					serializerDataOutputStream.writeLong(data.getOid());
 					
-					short indexCounter = 0;
-					int upto = Math.min((part + 1) * maxIndexValues, totalNrIndices);
-					serializerDataOutputStream.writeInt(upto - part * maxIndexValues);
-					for (int i=part * maxIndexValues; i<upto; i++) {
-						serializerDataOutputStream.writeShort(indexCounter++);
-					}
+					// Split geometry, this algorithm - for now - just throws away all the reuse of vertices that might be there
+					// Also, although usually the vertices buffers are too large, this algorithm is based on the indices, so we
+					// probably are not cramming as much data as we can in each "part", but that's not really a problem I think
+
+					int nrParts = (totalNrIndices + maxIndexValues - 1) / maxIndexValues;
+					serializerDataOutputStream.writeInt(nrParts);
+
+					ByteBuffer indicesBuffer = ByteBuffer.wrap(indices);
+					indicesBuffer.order(ByteOrder.LITTLE_ENDIAN);
+					IntBuffer indicesIntBuffer = indicesBuffer.asIntBuffer();
+
+					ByteBuffer vertexBuffer = ByteBuffer.wrap(vertices);
+					vertexBuffer.order(ByteOrder.LITTLE_ENDIAN);
+					FloatBuffer verticesFloatBuffer = vertexBuffer.asFloatBuffer();
 					
-					// Aligning to 4-bytes
-					if ((upto - part * maxIndexValues) % 2 != 0) {
-						serializerDataOutputStream.writeShort((short)0);
-					}
-					
-					int nrVertices = (upto - part * maxIndexValues) * 3;
-					serializerDataOutputStream.writeInt(nrVertices);
-					for (int i=part * maxIndexValues; i<upto; i+=3) {
-						int oldIndex1 = indicesIntBuffer.get(i);
-						int oldIndex2 = indicesIntBuffer.get(i+1);
-						int oldIndex3 = indicesIntBuffer.get(i+2);
+					ByteBuffer normalsBuffer = ByteBuffer.wrap(normals);
+					normalsBuffer.order(ByteOrder.LITTLE_ENDIAN);
+					FloatBuffer normalsFloatBuffer = normalsBuffer.asFloatBuffer();
+
+					for (int part=0; part<nrParts; part++) {
+						long splitId = splitCounter++;
+						serializerDataOutputStream.writeLong(splitId);
 						
-						serializerDataOutputStream.writeFloat(verticesFloatBuffer.get(oldIndex1 * 3));
-						serializerDataOutputStream.writeFloat(verticesFloatBuffer.get(oldIndex1 * 3 + 1));
-						serializerDataOutputStream.writeFloat(verticesFloatBuffer.get(oldIndex1 * 3 + 2));
-						serializerDataOutputStream.writeFloat(verticesFloatBuffer.get(oldIndex2 * 3));
-						serializerDataOutputStream.writeFloat(verticesFloatBuffer.get(oldIndex2 * 3 + 1));
-						serializerDataOutputStream.writeFloat(verticesFloatBuffer.get(oldIndex2 * 3 + 2));
-						serializerDataOutputStream.writeFloat(verticesFloatBuffer.get(oldIndex3 * 3));
-						serializerDataOutputStream.writeFloat(verticesFloatBuffer.get(oldIndex3 * 3 + 1));
-						serializerDataOutputStream.writeFloat(verticesFloatBuffer.get(oldIndex3 * 3 + 2));
-					}
-					serializerDataOutputStream.writeInt(nrVertices);
-					for (int i=part * maxIndexValues; i<upto; i+=3) {
-						int oldIndex1 = indicesIntBuffer.get(i);
-						int oldIndex2 = indicesIntBuffer.get(i+1);
-						int oldIndex3 = indicesIntBuffer.get(i+2);
+						short indexCounter = 0;
+						int upto = Math.min((part + 1) * maxIndexValues, totalNrIndices);
+						serializerDataOutputStream.writeInt(upto - part * maxIndexValues);
+						for (int i=part * maxIndexValues; i<upto; i++) {
+							serializerDataOutputStream.writeShort(indexCounter++);
+						}
 						
-						serializerDataOutputStream.writeFloat(normalsFloatBuffer.get(oldIndex1 * 3));
-						serializerDataOutputStream.writeFloat(normalsFloatBuffer.get(oldIndex1 * 3 + 1));
-						serializerDataOutputStream.writeFloat(normalsFloatBuffer.get(oldIndex1 * 3 + 2));
-						serializerDataOutputStream.writeFloat(normalsFloatBuffer.get(oldIndex2 * 3));
-						serializerDataOutputStream.writeFloat(normalsFloatBuffer.get(oldIndex2 * 3 + 1));
-						serializerDataOutputStream.writeFloat(normalsFloatBuffer.get(oldIndex2 * 3 + 2));
-						serializerDataOutputStream.writeFloat(normalsFloatBuffer.get(oldIndex3 * 3));
-						serializerDataOutputStream.writeFloat(normalsFloatBuffer.get(oldIndex3 * 3 + 1));
-						serializerDataOutputStream.writeFloat(normalsFloatBuffer.get(oldIndex3 * 3 + 2));
-					}
-					// Only when materials are used we send them
-					if (materials != null) {
-						ByteBuffer materialsByteBuffer = ByteBuffer.wrap(materials);
-						materialsByteBuffer.order(ByteOrder.LITTLE_ENDIAN);
-						FloatBuffer materialsFloatBuffer = materialsByteBuffer.asFloatBuffer();
-
-						serializerDataOutputStream.writeInt(nrVertices * 4 / 3);
+						// Aligning to 4-bytes
+						if ((upto - part * maxIndexValues) % 2 != 0) {
+							serializerDataOutputStream.writeShort((short)0);
+						}
+						
+						int nrVertices = (upto - part * maxIndexValues) * 3;
+						serializerDataOutputStream.writeInt(nrVertices);
 						for (int i=part * maxIndexValues; i<upto; i+=3) {
 							int oldIndex1 = indicesIntBuffer.get(i);
 							int oldIndex2 = indicesIntBuffer.get(i+1);
 							int oldIndex3 = indicesIntBuffer.get(i+2);
-
-							serializerDataOutputStream.writeFloat(materialsFloatBuffer.get(oldIndex1 * 4));
-							serializerDataOutputStream.writeFloat(materialsFloatBuffer.get(oldIndex1 * 4 + 1));
-							serializerDataOutputStream.writeFloat(materialsFloatBuffer.get(oldIndex1 * 4 + 2));
-							serializerDataOutputStream.writeFloat(materialsFloatBuffer.get(oldIndex1 * 4 + 3));
-							serializerDataOutputStream.writeFloat(materialsFloatBuffer.get(oldIndex2 * 4));
-							serializerDataOutputStream.writeFloat(materialsFloatBuffer.get(oldIndex2 * 4 + 1));
-							serializerDataOutputStream.writeFloat(materialsFloatBuffer.get(oldIndex2 * 4 + 2));
-							serializerDataOutputStream.writeFloat(materialsFloatBuffer.get(oldIndex2 * 4 + 3));
-							serializerDataOutputStream.writeFloat(materialsFloatBuffer.get(oldIndex3 * 4));
-							serializerDataOutputStream.writeFloat(materialsFloatBuffer.get(oldIndex3 * 4 + 1));
-							serializerDataOutputStream.writeFloat(materialsFloatBuffer.get(oldIndex3 * 4 + 2));
-							serializerDataOutputStream.writeFloat(materialsFloatBuffer.get(oldIndex3 * 4 + 3));
+							
+							serializerDataOutputStream.writeFloat(verticesFloatBuffer.get(oldIndex1 * 3));
+							serializerDataOutputStream.writeFloat(verticesFloatBuffer.get(oldIndex1 * 3 + 1));
+							serializerDataOutputStream.writeFloat(verticesFloatBuffer.get(oldIndex1 * 3 + 2));
+							serializerDataOutputStream.writeFloat(verticesFloatBuffer.get(oldIndex2 * 3));
+							serializerDataOutputStream.writeFloat(verticesFloatBuffer.get(oldIndex2 * 3 + 1));
+							serializerDataOutputStream.writeFloat(verticesFloatBuffer.get(oldIndex2 * 3 + 2));
+							serializerDataOutputStream.writeFloat(verticesFloatBuffer.get(oldIndex3 * 3));
+							serializerDataOutputStream.writeFloat(verticesFloatBuffer.get(oldIndex3 * 3 + 1));
+							serializerDataOutputStream.writeFloat(verticesFloatBuffer.get(oldIndex3 * 3 + 2));
 						}
+						serializerDataOutputStream.writeInt(nrVertices);
+						for (int i=part * maxIndexValues; i<upto; i+=3) {
+							int oldIndex1 = indicesIntBuffer.get(i);
+							int oldIndex2 = indicesIntBuffer.get(i+1);
+							int oldIndex3 = indicesIntBuffer.get(i+2);
+							
+							serializerDataOutputStream.writeFloat(normalsFloatBuffer.get(oldIndex1 * 3));
+							serializerDataOutputStream.writeFloat(normalsFloatBuffer.get(oldIndex1 * 3 + 1));
+							serializerDataOutputStream.writeFloat(normalsFloatBuffer.get(oldIndex1 * 3 + 2));
+							serializerDataOutputStream.writeFloat(normalsFloatBuffer.get(oldIndex2 * 3));
+							serializerDataOutputStream.writeFloat(normalsFloatBuffer.get(oldIndex2 * 3 + 1));
+							serializerDataOutputStream.writeFloat(normalsFloatBuffer.get(oldIndex2 * 3 + 2));
+							serializerDataOutputStream.writeFloat(normalsFloatBuffer.get(oldIndex3 * 3));
+							serializerDataOutputStream.writeFloat(normalsFloatBuffer.get(oldIndex3 * 3 + 1));
+							serializerDataOutputStream.writeFloat(normalsFloatBuffer.get(oldIndex3 * 3 + 2));
+						}
+						// Only when materials are used we send them
+						if (materials != null) {
+							ByteBuffer materialsByteBuffer = ByteBuffer.wrap(materials);
+							materialsByteBuffer.order(ByteOrder.LITTLE_ENDIAN);
+							FloatBuffer materialsFloatBuffer = materialsByteBuffer.asFloatBuffer();
+
+							serializerDataOutputStream.writeInt(nrVertices * 4 / 3);
+							for (int i=part * maxIndexValues; i<upto; i+=3) {
+								int oldIndex1 = indicesIntBuffer.get(i);
+								int oldIndex2 = indicesIntBuffer.get(i+1);
+								int oldIndex3 = indicesIntBuffer.get(i+2);
+
+								serializerDataOutputStream.writeFloat(materialsFloatBuffer.get(oldIndex1 * 4));
+								serializerDataOutputStream.writeFloat(materialsFloatBuffer.get(oldIndex1 * 4 + 1));
+								serializerDataOutputStream.writeFloat(materialsFloatBuffer.get(oldIndex1 * 4 + 2));
+								serializerDataOutputStream.writeFloat(materialsFloatBuffer.get(oldIndex1 * 4 + 3));
+								serializerDataOutputStream.writeFloat(materialsFloatBuffer.get(oldIndex2 * 4));
+								serializerDataOutputStream.writeFloat(materialsFloatBuffer.get(oldIndex2 * 4 + 1));
+								serializerDataOutputStream.writeFloat(materialsFloatBuffer.get(oldIndex2 * 4 + 2));
+								serializerDataOutputStream.writeFloat(materialsFloatBuffer.get(oldIndex2 * 4 + 3));
+								serializerDataOutputStream.writeFloat(materialsFloatBuffer.get(oldIndex3 * 4));
+								serializerDataOutputStream.writeFloat(materialsFloatBuffer.get(oldIndex3 * 4 + 1));
+								serializerDataOutputStream.writeFloat(materialsFloatBuffer.get(oldIndex3 * 4 + 2));
+								serializerDataOutputStream.writeFloat(materialsFloatBuffer.get(oldIndex3 * 4 + 3));
+							}
+						} else {
+							// No materials used
+							serializerDataOutputStream.writeInt(0);
+						}
+					}
+				} else {
+					serializerDataOutputStream.write(MessageType.GEOMETRY_TRIANGLES.getId());
+					serializerDataOutputStream.write(new byte[7]);
+					serializerDataOutputStream.writeLong(data.getOid());
+					
+					ByteBuffer indicesBuffer = ByteBuffer.wrap(indices);
+					indicesBuffer.order(ByteOrder.LITTLE_ENDIAN);
+					serializerDataOutputStream.writeInt(indicesBuffer.capacity() / 4);
+					IntBuffer intBuffer = indicesBuffer.asIntBuffer();
+					for (int i=0; i<intBuffer.capacity(); i++) {
+						serializerDataOutputStream.writeShort((short)intBuffer.get());
+					}
+					
+					// Aligning to 4-bytes
+					if (intBuffer.capacity() % 2 != 0) {
+						serializerDataOutputStream.writeShort((short)0);
+					}
+					
+					ByteBuffer vertexByteBuffer = ByteBuffer.wrap(vertices);
+					serializerDataOutputStream.writeInt(vertexByteBuffer.capacity() / 4);
+					serializerDataOutputStream.write(vertexByteBuffer.array());
+					
+					ByteBuffer normalsBuffer = ByteBuffer.wrap(normals);
+					serializerDataOutputStream.writeInt(normalsBuffer.capacity() / 4);
+					serializerDataOutputStream.write(normalsBuffer.array());
+					
+					// Only when materials are used we send them
+					if (materials != null) {
+						ByteBuffer materialsByteBuffer = ByteBuffer.wrap(materials);
+						
+						serializerDataOutputStream.writeInt(materialsByteBuffer.capacity() / 4);
+						serializerDataOutputStream.write(materialsByteBuffer.array());
 					} else {
 						// No materials used
 						serializerDataOutputStream.writeInt(0);
@@ -363,12 +401,7 @@ public class BinaryGeometryMessagingStreamingSerializer3 implements MessagingStr
 				serializerDataOutputStream.writeInt(indicesBuffer.capacity() / 4);
 				IntBuffer intBuffer = indicesBuffer.asIntBuffer();
 				for (int i=0; i<intBuffer.capacity(); i++) {
-					serializerDataOutputStream.writeShort((short)intBuffer.get());
-				}
-				
-				// Aligning to 4-bytes
-				if (intBuffer.capacity() % 2 != 0) {
-					serializerDataOutputStream.writeShort((short)0);
+					serializerDataOutputStream.writeInt(intBuffer.get());
 				}
 				
 				ByteBuffer vertexByteBuffer = ByteBuffer.wrap(vertices);
