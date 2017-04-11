@@ -1,7 +1,7 @@
 package org.bimserver.serializers.binarygeometry;
 
 /******************************************************************************
- * Copyright (C) 2009-2016  BIMserver.org
+ * Copyright (C) 2009-2017  BIMserver.org
  * 
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -221,7 +221,11 @@ public class BinaryGeometryMessagingStreamingSerializer2 implements MessagingStr
 			info = last;
 			last = null;
 		} else {
-			info = iterator.next();
+			if (iterator.hasNext()) {
+				info = iterator.next();
+			} else {
+				return false;
+			}
 		}
 		Object transformation = info.eGet(info.eClass().getEStructuralFeature("transformation"));
 		Object dataOid = info.eGet(info.eClass().getEStructuralFeature("data"));

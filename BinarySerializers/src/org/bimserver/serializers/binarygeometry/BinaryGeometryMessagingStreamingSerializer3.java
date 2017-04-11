@@ -1,7 +1,7 @@
 package org.bimserver.serializers.binarygeometry;
 
 /******************************************************************************
- * Copyright (C) 2009-2016  BIMserver.org
+ * Copyright (C) 2009-2017  BIMserver.org
  * 
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -120,6 +120,9 @@ public class BinaryGeometryMessagingStreamingSerializer3 implements MessagingStr
 		}
 		case START:
 			writeStart();
+			if (next == null) {
+				return false;
+			}
 			mode = Mode.DATA;
 			break;
 		case DATA:
@@ -147,12 +150,12 @@ public class BinaryGeometryMessagingStreamingSerializer3 implements MessagingStr
 		HashMapVirtualObject next = null;
 		try {
 			next = objectProvider.next();
-		while (next != null) {
-			if (next.eClass() == GeometryPackage.eINSTANCE.getGeometryInfo()) {
-				size++;
+			while (next != null) {
+				if (next.eClass() == GeometryPackage.eINSTANCE.getGeometryInfo()) {
+					size++;
+				}
+				next = objectProvider.next();
 			}
-			next = objectProvider.next();
-		}
 		} catch (BimserverDatabaseException e) {
 			throw new SerializerException(e);
 		}
