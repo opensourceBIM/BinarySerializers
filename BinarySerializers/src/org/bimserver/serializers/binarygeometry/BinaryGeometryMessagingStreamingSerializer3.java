@@ -57,9 +57,11 @@ public class BinaryGeometryMessagingStreamingSerializer3 implements MessagingStr
 	 *  - Incrementing splitcounter instead of decrementing (no idea why it was doing that)
 	 *  Version 10:
 	 *  - Sending the materials/colors for parts as well again
+	 *  Version 11:
+	 *  - Added ability to send one specific color for all geometry contained in a GeometryData object
 	 */
 	
-	private static final byte FORMAT_VERSION = 10;
+	private static final byte FORMAT_VERSION = 11;
 	private boolean splitGeometry = true;
 	
 	private enum Mode {
@@ -244,11 +246,13 @@ public class BinaryGeometryMessagingStreamingSerializer3 implements MessagingStr
 			EStructuralFeature verticesFeature = data.eClass().getEStructuralFeature("vertices");
 			EStructuralFeature normalsFeature = data.eClass().getEStructuralFeature("normals");
 			EStructuralFeature materialsFeature = data.eClass().getEStructuralFeature("materials");
+			EStructuralFeature colorFeature = data.eClass().getEStructuralFeature("color");
 			
 			byte[] indices = (byte[])data.eGet(indicesFeature);
 			byte[] vertices = (byte[])data.eGet(verticesFeature);
 			byte[] normals = (byte[])data.eGet(normalsFeature);
 			byte[] materials = (byte[])data.eGet(materialsFeature);
+			HashMapWrappedVirtualObject color = (HashMapWrappedVirtualObject)data.eGet(colorFeature);
 
 			int totalNrIndices = indices.length / 4;
 			int maxIndexValues = 16389;
@@ -287,6 +291,17 @@ public class BinaryGeometryMessagingStreamingSerializer3 implements MessagingStr
 						serializerDataOutputStream.writeInt(upto - part * maxIndexValues);
 						for (int i=part * maxIndexValues; i<upto; i++) {
 							serializerDataOutputStream.writeShort(indexCounter++);
+						}
+						
+						// Added in version 11
+						if (color != null) {
+							serializerDataOutputStream.writeInt(1);
+							serializerDataOutputStream.writeFloat((float)color.eGet("x"));
+							serializerDataOutputStream.writeFloat((float)color.eGet("y"));
+							serializerDataOutputStream.writeFloat((float)color.eGet("z"));
+							serializerDataOutputStream.writeFloat((float)color.eGet("w"));
+						} else {
+							serializerDataOutputStream.writeInt(0);
 						}
 						
 						// Aligning to 4-bytes
@@ -328,7 +343,7 @@ public class BinaryGeometryMessagingStreamingSerializer3 implements MessagingStr
 							serializerDataOutputStream.writeFloat(normalsFloatBuffer.get(oldIndex3 * 3 + 2));
 						}
 						// Only when materials are used we send them
-						if (materials != null) {
+						if (materials != null && color == null) {
 							ByteBuffer materialsByteBuffer = ByteBuffer.wrap(materials);
 							materialsByteBuffer.order(ByteOrder.LITTLE_ENDIAN);
 							FloatBuffer materialsFloatBuffer = materialsByteBuffer.asFloatBuffer();
@@ -370,6 +385,17 @@ public class BinaryGeometryMessagingStreamingSerializer3 implements MessagingStr
 						serializerDataOutputStream.writeShort((short)intBuffer.get());
 					}
 					
+					// Added in version 11
+					if (color != null) {
+						serializerDataOutputStream.writeInt(1);
+						serializerDataOutputStream.writeFloat((float)color.eGet("x"));
+						serializerDataOutputStream.writeFloat((float)color.eGet("y"));
+						serializerDataOutputStream.writeFloat((float)color.eGet("z"));
+						serializerDataOutputStream.writeFloat((float)color.eGet("w"));
+					} else {
+						serializerDataOutputStream.writeInt(0);
+					}
+					
 					// Aligning to 4-bytes
 					if (intBuffer.capacity() % 2 != 0) {
 						serializerDataOutputStream.writeShort((short)0);
@@ -384,7 +410,7 @@ public class BinaryGeometryMessagingStreamingSerializer3 implements MessagingStr
 					serializerDataOutputStream.write(normalsBuffer.array());
 					
 					// Only when materials are used we send them
-					if (materials != null) {
+					if (materials != null && color == null) {
 						ByteBuffer materialsByteBuffer = ByteBuffer.wrap(materials);
 						
 						serializerDataOutputStream.writeInt(materialsByteBuffer.capacity() / 4);
@@ -406,7 +432,18 @@ public class BinaryGeometryMessagingStreamingSerializer3 implements MessagingStr
 				for (int i=0; i<intBuffer.capacity(); i++) {
 					serializerDataOutputStream.writeInt(intBuffer.get());
 				}
-				
+
+				// Added in version 11
+				if (color != null) {
+					serializerDataOutputStream.writeInt(1);
+					serializerDataOutputStream.writeFloat((float)color.eGet("x"));
+					serializerDataOutputStream.writeFloat((float)color.eGet("y"));
+					serializerDataOutputStream.writeFloat((float)color.eGet("z"));
+					serializerDataOutputStream.writeFloat((float)color.eGet("w"));
+				} else {
+					serializerDataOutputStream.writeInt(0);
+				}
+
 				ByteBuffer vertexByteBuffer = ByteBuffer.wrap(vertices);
 				serializerDataOutputStream.writeInt(vertexByteBuffer.capacity() / 4);
 				serializerDataOutputStream.write(vertexByteBuffer.array());
@@ -416,7 +453,7 @@ public class BinaryGeometryMessagingStreamingSerializer3 implements MessagingStr
 				serializerDataOutputStream.write(normalsBuffer.array());
 				
 				// Only when materials are used we send them
-				if (materials != null) {
+				if (materials != null && color == null) {
 					ByteBuffer materialsByteBuffer = ByteBuffer.wrap(materials);
 					
 					serializerDataOutputStream.writeInt(materialsByteBuffer.capacity() / 4);
