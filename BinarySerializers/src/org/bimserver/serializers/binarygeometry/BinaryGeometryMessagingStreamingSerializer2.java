@@ -415,4 +415,10 @@ public class BinaryGeometryMessagingStreamingSerializer2 implements MessagingStr
 		
 		return iterator.hasNext();
 	}
+
+	@Override
+	public void close() throws IOException {
+		// TODO Auto-generated method stub
+		
+	}
 }

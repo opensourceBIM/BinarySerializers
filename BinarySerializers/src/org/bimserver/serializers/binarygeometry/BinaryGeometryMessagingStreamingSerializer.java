@@ -223,4 +223,10 @@ public class BinaryGeometryMessagingStreamingSerializer implements MessagingStre
 		}
 		return next != null;
 	}
+
+	@Override
+	public void close() throws IOException {
+		// TODO Auto-generated method stub
+		
+	}
 }
