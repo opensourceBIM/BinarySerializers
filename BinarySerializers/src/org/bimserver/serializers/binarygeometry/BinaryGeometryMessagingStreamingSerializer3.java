@@ -59,9 +59,11 @@ public class BinaryGeometryMessagingStreamingSerializer3 implements MessagingStr
 	 *  - Sending the materials/colors for parts as well again
 	 *  Version 11:
 	 *  - Added ability to send one specific color for all geometry contained in a GeometryData object
+	 *  Version 12:
+	 *  - Added boolean value that indicates whether an object/geometry has transparency
 	 */
 	
-	private static final byte FORMAT_VERSION = 11;
+	private static final byte FORMAT_VERSION = 12;
 	private boolean splitGeometry = true;
 	
 	private enum Mode {
@@ -209,6 +211,7 @@ public class BinaryGeometryMessagingStreamingSerializer3 implements MessagingStr
 		}
 		if (GeometryPackage.eINSTANCE.getGeometryInfo() == next.eClass()) {
 			HashMapVirtualObject info = next;
+			EStructuralFeature hasTransparencyFeature = info.eClass().getEStructuralFeature("hasTransparency");
 			Object transformation = info.eGet(info.eClass().getEStructuralFeature("transformation"));
 			Object dataOid = info.eGet(info.eClass().getEStructuralFeature("data"));
 			
@@ -216,6 +219,7 @@ public class BinaryGeometryMessagingStreamingSerializer3 implements MessagingStr
 			serializerDataOutputStream.write(new byte[7]);
 			serializerDataOutputStream.writeLong(info.getRoid());
 			serializerDataOutputStream.writeLong(info.getOid());
+			serializerDataOutputStream.writeLong((boolean)info.eGet(hasTransparencyFeature) ? 1 : 0);
 			HashMapWrappedVirtualObject minBounds = (HashMapWrappedVirtualObject) info.eGet(info.eClass().getEStructuralFeature("minBounds"));
 			HashMapWrappedVirtualObject maxBounds = (HashMapWrappedVirtualObject) info.eGet(info.eClass().getEStructuralFeature("maxBounds"));
 			Double minX = (Double) minBounds.eGet("x");
@@ -225,14 +229,15 @@ public class BinaryGeometryMessagingStreamingSerializer3 implements MessagingStr
 			Double maxY = (Double) maxBounds.eGet("y");
 			Double maxZ = (Double) maxBounds.eGet("z");
 			
-			serializerDataOutputStream.writeDouble(minX);
-			serializerDataOutputStream.writeDouble(minY);
-			serializerDataOutputStream.writeDouble(minZ);
-			serializerDataOutputStream.writeDouble(maxX);
-			serializerDataOutputStream.writeDouble(maxY);
-			serializerDataOutputStream.writeDouble(maxZ);
+			serializerDataOutputStream.ensureExtraCapacity(8 * 6 + ((byte[])transformation).length + 8);
+			serializerDataOutputStream.writeDoubleUnchecked(minX);
+			serializerDataOutputStream.writeDoubleUnchecked(minY);
+			serializerDataOutputStream.writeDoubleUnchecked(minZ);
+			serializerDataOutputStream.writeDoubleUnchecked(maxX);
+			serializerDataOutputStream.writeDoubleUnchecked(maxY);
+			serializerDataOutputStream.writeDoubleUnchecked(maxZ);
 			serializerDataOutputStream.write((byte[])transformation);
-			serializerDataOutputStream.writeLong((Long)dataOid);
+			serializerDataOutputStream.writeLongUnchecked((Long)dataOid);
 			
 			nrObjectsWritten++;
 			if (progressReporter != null) {
@@ -247,6 +252,7 @@ public class BinaryGeometryMessagingStreamingSerializer3 implements MessagingStr
 			EStructuralFeature normalsFeature = data.eClass().getEStructuralFeature("normals");
 			EStructuralFeature materialsFeature = data.eClass().getEStructuralFeature("materials");
 			EStructuralFeature colorFeature = data.eClass().getEStructuralFeature("color");
+			EStructuralFeature hasTransparencyFeature = data.eClass().getEStructuralFeature("hasTransparency");
 			
 			byte[] indices = (byte[])data.eGet(indicesFeature);
 			byte[] vertices = (byte[])data.eGet(verticesFeature);
@@ -259,8 +265,10 @@ public class BinaryGeometryMessagingStreamingSerializer3 implements MessagingStr
 
 			if (splitGeometry) {
 				if (totalNrIndices > maxIndexValues) {
-					serializerDataOutputStream.write(MessageType.GEOMETRY_TRIANGLES_PARTED.getId());
+					LOGGER.info("Indices: " + totalNrIndices);
+					serializerDataOutputStream.writeByte(MessageType.GEOMETRY_TRIANGLES_PARTED.getId());
 					serializerDataOutputStream.write(new byte[7]);
+					serializerDataOutputStream.writeLong((boolean)data.eGet(hasTransparencyFeature) ? 1 : 0);
 					serializerDataOutputStream.writeLong(data.getOid());
 					
 					// Split geometry, this algorithm - for now - just throws away all the reuse of vertices that might be there
@@ -289,8 +297,9 @@ public class BinaryGeometryMessagingStreamingSerializer3 implements MessagingStr
 						short indexCounter = 0;
 						int upto = Math.min((part + 1) * maxIndexValues, totalNrIndices);
 						serializerDataOutputStream.writeInt(upto - part * maxIndexValues);
+						serializerDataOutputStream.ensureExtraCapacity(2 * (upto - part * maxIndexValues));
 						for (int i=part * maxIndexValues; i<upto; i++) {
-							serializerDataOutputStream.writeShort(indexCounter++);
+							serializerDataOutputStream.writeShortUnchecked(indexCounter++);
 						}
 						
 						// Added in version 11
@@ -311,36 +320,39 @@ public class BinaryGeometryMessagingStreamingSerializer3 implements MessagingStr
 						
 						int nrVertices = (upto - part * maxIndexValues) * 3;
 						serializerDataOutputStream.writeInt(nrVertices);
+						serializerDataOutputStream.ensureExtraCapacity(12 * (upto - part * maxIndexValues));
+						
 						for (int i=part * maxIndexValues; i<upto; i+=3) {
 							int oldIndex1 = indicesIntBuffer.get(i);
 							int oldIndex2 = indicesIntBuffer.get(i+1);
 							int oldIndex3 = indicesIntBuffer.get(i+2);
 							
-							serializerDataOutputStream.writeFloat(verticesFloatBuffer.get(oldIndex1 * 3));
-							serializerDataOutputStream.writeFloat(verticesFloatBuffer.get(oldIndex1 * 3 + 1));
-							serializerDataOutputStream.writeFloat(verticesFloatBuffer.get(oldIndex1 * 3 + 2));
-							serializerDataOutputStream.writeFloat(verticesFloatBuffer.get(oldIndex2 * 3));
-							serializerDataOutputStream.writeFloat(verticesFloatBuffer.get(oldIndex2 * 3 + 1));
-							serializerDataOutputStream.writeFloat(verticesFloatBuffer.get(oldIndex2 * 3 + 2));
-							serializerDataOutputStream.writeFloat(verticesFloatBuffer.get(oldIndex3 * 3));
-							serializerDataOutputStream.writeFloat(verticesFloatBuffer.get(oldIndex3 * 3 + 1));
-							serializerDataOutputStream.writeFloat(verticesFloatBuffer.get(oldIndex3 * 3 + 2));
+							serializerDataOutputStream.writeFloatUnchecked(verticesFloatBuffer.get(oldIndex1 * 3));
+							serializerDataOutputStream.writeFloatUnchecked(verticesFloatBuffer.get(oldIndex1 * 3 + 1));
+							serializerDataOutputStream.writeFloatUnchecked(verticesFloatBuffer.get(oldIndex1 * 3 + 2));
+							serializerDataOutputStream.writeFloatUnchecked(verticesFloatBuffer.get(oldIndex2 * 3));
+							serializerDataOutputStream.writeFloatUnchecked(verticesFloatBuffer.get(oldIndex2 * 3 + 1));
+							serializerDataOutputStream.writeFloatUnchecked(verticesFloatBuffer.get(oldIndex2 * 3 + 2));
+							serializerDataOutputStream.writeFloatUnchecked(verticesFloatBuffer.get(oldIndex3 * 3));
+							serializerDataOutputStream.writeFloatUnchecked(verticesFloatBuffer.get(oldIndex3 * 3 + 1));
+							serializerDataOutputStream.writeFloatUnchecked(verticesFloatBuffer.get(oldIndex3 * 3 + 2));
 						}
 						serializerDataOutputStream.writeInt(nrVertices);
+						serializerDataOutputStream.ensureExtraCapacity(12 * (upto - part * maxIndexValues));
 						for (int i=part * maxIndexValues; i<upto; i+=3) {
 							int oldIndex1 = indicesIntBuffer.get(i);
 							int oldIndex2 = indicesIntBuffer.get(i+1);
 							int oldIndex3 = indicesIntBuffer.get(i+2);
 							
-							serializerDataOutputStream.writeFloat(normalsFloatBuffer.get(oldIndex1 * 3));
-							serializerDataOutputStream.writeFloat(normalsFloatBuffer.get(oldIndex1 * 3 + 1));
-							serializerDataOutputStream.writeFloat(normalsFloatBuffer.get(oldIndex1 * 3 + 2));
-							serializerDataOutputStream.writeFloat(normalsFloatBuffer.get(oldIndex2 * 3));
-							serializerDataOutputStream.writeFloat(normalsFloatBuffer.get(oldIndex2 * 3 + 1));
-							serializerDataOutputStream.writeFloat(normalsFloatBuffer.get(oldIndex2 * 3 + 2));
-							serializerDataOutputStream.writeFloat(normalsFloatBuffer.get(oldIndex3 * 3));
-							serializerDataOutputStream.writeFloat(normalsFloatBuffer.get(oldIndex3 * 3 + 1));
-							serializerDataOutputStream.writeFloat(normalsFloatBuffer.get(oldIndex3 * 3 + 2));
+							serializerDataOutputStream.writeFloatUnchecked(normalsFloatBuffer.get(oldIndex1 * 3));
+							serializerDataOutputStream.writeFloatUnchecked(normalsFloatBuffer.get(oldIndex1 * 3 + 1));
+							serializerDataOutputStream.writeFloatUnchecked(normalsFloatBuffer.get(oldIndex1 * 3 + 2));
+							serializerDataOutputStream.writeFloatUnchecked(normalsFloatBuffer.get(oldIndex2 * 3));
+							serializerDataOutputStream.writeFloatUnchecked(normalsFloatBuffer.get(oldIndex2 * 3 + 1));
+							serializerDataOutputStream.writeFloatUnchecked(normalsFloatBuffer.get(oldIndex2 * 3 + 2));
+							serializerDataOutputStream.writeFloatUnchecked(normalsFloatBuffer.get(oldIndex3 * 3));
+							serializerDataOutputStream.writeFloatUnchecked(normalsFloatBuffer.get(oldIndex3 * 3 + 1));
+							serializerDataOutputStream.writeFloatUnchecked(normalsFloatBuffer.get(oldIndex3 * 3 + 2));
 						}
 						// Only when materials are used we send them
 						if (materials != null && color == null) {
@@ -349,23 +361,24 @@ public class BinaryGeometryMessagingStreamingSerializer3 implements MessagingStr
 							FloatBuffer materialsFloatBuffer = materialsByteBuffer.asFloatBuffer();
 
 							serializerDataOutputStream.writeInt(nrVertices * 4 / 3);
+							serializerDataOutputStream.ensureExtraCapacity(16 * (upto - part * maxIndexValues));
 							for (int i=part * maxIndexValues; i<upto; i+=3) {
 								int oldIndex1 = indicesIntBuffer.get(i);
 								int oldIndex2 = indicesIntBuffer.get(i+1);
 								int oldIndex3 = indicesIntBuffer.get(i+2);
 
-								serializerDataOutputStream.writeFloat(materialsFloatBuffer.get(oldIndex1 * 4));
-								serializerDataOutputStream.writeFloat(materialsFloatBuffer.get(oldIndex1 * 4 + 1));
-								serializerDataOutputStream.writeFloat(materialsFloatBuffer.get(oldIndex1 * 4 + 2));
-								serializerDataOutputStream.writeFloat(materialsFloatBuffer.get(oldIndex1 * 4 + 3));
-								serializerDataOutputStream.writeFloat(materialsFloatBuffer.get(oldIndex2 * 4));
-								serializerDataOutputStream.writeFloat(materialsFloatBuffer.get(oldIndex2 * 4 + 1));
-								serializerDataOutputStream.writeFloat(materialsFloatBuffer.get(oldIndex2 * 4 + 2));
-								serializerDataOutputStream.writeFloat(materialsFloatBuffer.get(oldIndex2 * 4 + 3));
-								serializerDataOutputStream.writeFloat(materialsFloatBuffer.get(oldIndex3 * 4));
-								serializerDataOutputStream.writeFloat(materialsFloatBuffer.get(oldIndex3 * 4 + 1));
-								serializerDataOutputStream.writeFloat(materialsFloatBuffer.get(oldIndex3 * 4 + 2));
-								serializerDataOutputStream.writeFloat(materialsFloatBuffer.get(oldIndex3 * 4 + 3));
+								serializerDataOutputStream.writeFloatUnchecked(materialsFloatBuffer.get(oldIndex1 * 4));
+								serializerDataOutputStream.writeFloatUnchecked(materialsFloatBuffer.get(oldIndex1 * 4 + 1));
+								serializerDataOutputStream.writeFloatUnchecked(materialsFloatBuffer.get(oldIndex1 * 4 + 2));
+								serializerDataOutputStream.writeFloatUnchecked(materialsFloatBuffer.get(oldIndex1 * 4 + 3));
+								serializerDataOutputStream.writeFloatUnchecked(materialsFloatBuffer.get(oldIndex2 * 4));
+								serializerDataOutputStream.writeFloatUnchecked(materialsFloatBuffer.get(oldIndex2 * 4 + 1));
+								serializerDataOutputStream.writeFloatUnchecked(materialsFloatBuffer.get(oldIndex2 * 4 + 2));
+								serializerDataOutputStream.writeFloatUnchecked(materialsFloatBuffer.get(oldIndex2 * 4 + 3));
+								serializerDataOutputStream.writeFloatUnchecked(materialsFloatBuffer.get(oldIndex3 * 4));
+								serializerDataOutputStream.writeFloatUnchecked(materialsFloatBuffer.get(oldIndex3 * 4 + 1));
+								serializerDataOutputStream.writeFloatUnchecked(materialsFloatBuffer.get(oldIndex3 * 4 + 2));
+								serializerDataOutputStream.writeFloatUnchecked(materialsFloatBuffer.get(oldIndex3 * 4 + 3));
 							}
 						} else {
 							// No materials used
@@ -373,16 +386,18 @@ public class BinaryGeometryMessagingStreamingSerializer3 implements MessagingStr
 						}
 					}
 				} else {
-					serializerDataOutputStream.write(MessageType.GEOMETRY_TRIANGLES.getId());
+					serializerDataOutputStream.writeByte(MessageType.GEOMETRY_TRIANGLES.getId());
 					serializerDataOutputStream.write(new byte[7]);
+					serializerDataOutputStream.writeLong((boolean)data.eGet(hasTransparencyFeature) ? 1 : 0);
 					serializerDataOutputStream.writeLong(data.getOid());
 					
 					ByteBuffer indicesBuffer = ByteBuffer.wrap(indices);
 					indicesBuffer.order(ByteOrder.LITTLE_ENDIAN);
 					serializerDataOutputStream.writeInt(indicesBuffer.capacity() / 4);
 					IntBuffer intBuffer = indicesBuffer.asIntBuffer();
+					serializerDataOutputStream.ensureExtraCapacity(intBuffer.capacity());
 					for (int i=0; i<intBuffer.capacity(); i++) {
-						serializerDataOutputStream.writeShort((short)intBuffer.get());
+						serializerDataOutputStream.writeShortUnchecked((short)intBuffer.get());
 					}
 					
 					// Added in version 11
@@ -421,8 +436,9 @@ public class BinaryGeometryMessagingStreamingSerializer3 implements MessagingStr
 					}
 				}
 			} else {
-				serializerDataOutputStream.write(MessageType.GEOMETRY_TRIANGLES.getId());
+				serializerDataOutputStream.writeByte(MessageType.GEOMETRY_TRIANGLES.getId());
 				serializerDataOutputStream.write(new byte[7]);
+				serializerDataOutputStream.writeLong((boolean)data.eGet(hasTransparencyFeature) ? 1 : 0);
 				serializerDataOutputStream.writeLong(data.getOid());
 				
 				ByteBuffer indicesBuffer = ByteBuffer.wrap(indices);
@@ -470,5 +486,9 @@ public class BinaryGeometryMessagingStreamingSerializer3 implements MessagingStr
 			e.printStackTrace();
 		}
 		return next != null;
+	}
+
+	@Override
+	public void close() {
 	}
 }
