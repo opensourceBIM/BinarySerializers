@@ -43,6 +43,8 @@ import org.eclipse.emf.ecore.EStructuralFeature;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import com.google.common.base.Charsets;
+
 public class BinaryGeometryMessagingStreamingSerializer3 implements MessagingStreamingSerializer {
 	private static final Logger LOGGER = LoggerFactory.getLogger(BinaryGeometryMessagingStreamingSerializer3.class);
 
@@ -61,9 +63,13 @@ public class BinaryGeometryMessagingStreamingSerializer3 implements MessagingStr
 	 *  - Added ability to send one specific color for all geometry contained in a GeometryData object
 	 *  Version 12:
 	 *  - Added boolean value that indicates whether an object/geometry has transparency
+	 *  Version 13:
+	 *  - Added integer value that indicates how many times geometry is being reused
+	 *  Version 14:
+	 *  - Added ifcproduct oid to simplify client-side operations, also added type of object
 	 */
 	
-	private static final byte FORMAT_VERSION = 12;
+	private static final byte FORMAT_VERSION = 14;
 	private boolean splitGeometry = true;
 	
 	private enum Mode {
@@ -125,9 +131,10 @@ public class BinaryGeometryMessagingStreamingSerializer3 implements MessagingStr
 		case START:
 			writeStart();
 			if (next == null) {
-				return false;
+				mode = Mode.END;
+			} else {
+				mode = Mode.DATA;
 			}
-			mode = Mode.DATA;
 			break;
 		case DATA:
 			if (!writeData()) {
@@ -216,7 +223,12 @@ public class BinaryGeometryMessagingStreamingSerializer3 implements MessagingStr
 			Object dataOid = info.eGet(info.eClass().getEStructuralFeature("data"));
 			
 			serializerDataOutputStream.writeByte(MessageType.GEOMETRY_INFO.getId());
-			serializerDataOutputStream.write(new byte[7]);
+			long oid = (long) next.eGet(GeometryPackage.eINSTANCE.getGeometryInfo_IfcProductOid());
+			serializerDataOutputStream.writeLong(oid);
+			String type = objectProvider.getEClassForOid(oid).getName();
+			serializerDataOutputStream.writeUTF(type);
+			int extra = 8 - (type.getBytes(Charsets.UTF_8).length % 8);
+			serializerDataOutputStream.write(new byte[(5 + extra) % 8]);
 			serializerDataOutputStream.writeLong(info.getRoid());
 			serializerDataOutputStream.writeLong(info.getOid());
 			serializerDataOutputStream.writeLong((boolean)info.eGet(hasTransparencyFeature) ? 1 : 0);
@@ -265,9 +277,9 @@ public class BinaryGeometryMessagingStreamingSerializer3 implements MessagingStr
 
 			if (splitGeometry) {
 				if (totalNrIndices > maxIndexValues) {
-					LOGGER.info("Indices: " + totalNrIndices);
 					serializerDataOutputStream.writeByte(MessageType.GEOMETRY_TRIANGLES_PARTED.getId());
-					serializerDataOutputStream.write(new byte[7]);
+					serializerDataOutputStream.writeInt((int) data.get("reused"));
+					serializerDataOutputStream.write(new byte[3]);
 					serializerDataOutputStream.writeLong((boolean)data.eGet(hasTransparencyFeature) ? 1 : 0);
 					serializerDataOutputStream.writeLong(data.getOid());
 					
@@ -387,7 +399,8 @@ public class BinaryGeometryMessagingStreamingSerializer3 implements MessagingStr
 					}
 				} else {
 					serializerDataOutputStream.writeByte(MessageType.GEOMETRY_TRIANGLES.getId());
-					serializerDataOutputStream.write(new byte[7]);
+					serializerDataOutputStream.writeInt((int) data.get("reused"));
+					serializerDataOutputStream.write(new byte[3]);
 					serializerDataOutputStream.writeLong((boolean)data.eGet(hasTransparencyFeature) ? 1 : 0);
 					serializerDataOutputStream.writeLong(data.getOid());
 					
@@ -437,7 +450,8 @@ public class BinaryGeometryMessagingStreamingSerializer3 implements MessagingStr
 				}
 			} else {
 				serializerDataOutputStream.writeByte(MessageType.GEOMETRY_TRIANGLES.getId());
-				serializerDataOutputStream.write(new byte[7]);
+				serializerDataOutputStream.writeInt((int) data.get("reused"));
+				serializerDataOutputStream.write(new byte[3]);
 				serializerDataOutputStream.writeLong((boolean)data.eGet(hasTransparencyFeature) ? 1 : 0);
 				serializerDataOutputStream.writeLong(data.getOid());
 				
