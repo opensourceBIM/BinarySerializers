@@ -66,7 +66,7 @@ public class BinaryGeometryMessagingStreamingSerializer3 implements MessagingStr
 	 *  Version 13:
 	 *  - Added integer value that indicates how many times geometry is being reused
 	 *  Version 14:
-	 *  - Added ifcproduct oid to simplify client-side operations, also added type of object
+	 *  - Added ifcproduct oid to simplify client-side operations, also added type of object, also added type for GeometryData
 	 */
 	
 	private static final byte FORMAT_VERSION = 14;
@@ -400,7 +400,13 @@ public class BinaryGeometryMessagingStreamingSerializer3 implements MessagingStr
 				} else {
 					serializerDataOutputStream.writeByte(MessageType.GEOMETRY_TRIANGLES.getId());
 					serializerDataOutputStream.writeInt((int) data.get("reused"));
-					serializerDataOutputStream.write(new byte[3]);
+					
+					short cid = (short) data.get("type");
+					String type = objectProvider.getEClassForCid(cid).getName();
+					serializerDataOutputStream.writeUTF(type);
+					int extra = 8 - (type.getBytes(Charsets.UTF_8).length % 8);
+					serializerDataOutputStream.write(new byte[(1 + extra) % 8]);
+					
 					serializerDataOutputStream.writeLong((boolean)data.eGet(hasTransparencyFeature) ? 1 : 0);
 					serializerDataOutputStream.writeLong(data.getOid());
 					
@@ -451,7 +457,13 @@ public class BinaryGeometryMessagingStreamingSerializer3 implements MessagingStr
 			} else {
 				serializerDataOutputStream.writeByte(MessageType.GEOMETRY_TRIANGLES.getId());
 				serializerDataOutputStream.writeInt((int) data.get("reused"));
-				serializerDataOutputStream.write(new byte[3]);
+
+				short cid = (short) data.get("type");
+				String type = objectProvider.getEClassForCid(cid).getName();
+				serializerDataOutputStream.writeUTF(type);
+				int extra = 8 - (type.getBytes(Charsets.UTF_8).length % 8);
+				serializerDataOutputStream.write(new byte[(1 + extra) % 8]);
+
 				serializerDataOutputStream.writeLong((boolean)data.eGet(hasTransparencyFeature) ? 1 : 0);
 				serializerDataOutputStream.writeLong(data.getOid());
 				
