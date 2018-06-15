@@ -19,6 +19,8 @@ package org.bimserver.serializers.binarygeometry;
 
 import java.io.IOException;
 
+import org.bimserver.interfaces.objects.SBounds;
+import org.bimserver.interfaces.objects.SVector3f;
 import org.bimserver.models.geometry.Vector3f;
 
 import com.google.common.io.LittleEndianDataOutputStream;
@@ -42,6 +44,26 @@ public class Bounds {
 		this.max = new Double3(maxBounds.getX(), maxBounds.getY(), maxBounds.getZ());
 	}
 
+	public Bounds(SVector3f minBounds, SVector3f maxBounds) {
+		this.min = new Double3(minBounds.getX(), minBounds.getY(), minBounds.getZ());
+		this.max = new Double3(maxBounds.getX(), maxBounds.getY(), maxBounds.getZ());
+	}
+
+	public Bounds(org.bimserver.models.geometry.Bounds bounds) {
+		this(new Double3(
+				bounds.getMin().getX(), 
+				bounds.getMin().getY(), 
+				bounds.getMin().getZ()), 
+			new Double3(
+				bounds.getMax().getX(), 
+				bounds.getMax().getY(), 
+				bounds.getMax().getZ()));
+	}
+
+	public Bounds(SBounds bounds) {
+		this(bounds.getMin(), bounds.getMax());
+	}
+
 	public void integrate(Bounds objectBounds) {
 		this.min.min(objectBounds.min);
 		this.max.max(objectBounds.max);
@@ -50,5 +72,14 @@ public class Bounds {
 	public void writeTo(LittleEndianDataOutputStream dataOutputStream) throws IOException {
 		min.writeTo(dataOutputStream);
 		max.writeTo(dataOutputStream);
+	}
+
+	public boolean in(float[] vertex) {
+		return vertex[0] >= min.x && vertex[0] <= max.x && vertex[1] >= min.y && vertex[1] <= max.y && vertex[2] >= min.z && vertex[2] <= max.z;
+	}
+	
+	@Override
+	public String toString() {
+		return "[" + min.x + ", " + min.y + ", " + min.z + "] [" + max.x + ", " + max.y + ", " + max.z + "]";
 	}
 }

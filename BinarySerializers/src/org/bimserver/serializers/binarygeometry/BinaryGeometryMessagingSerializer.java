@@ -129,15 +129,7 @@ public class BinaryGeometryMessagingSerializer implements MessagingSerializer {
 		for (IdEObject ifcProduct : products) {
 			GeometryInfo geometryInfo = (GeometryInfo) ifcProduct.eGet(ifcProduct.eClass().getEStructuralFeature("geometry"));
 			if (geometryInfo != null && geometryInfo.getTransformation() != null) {
-				Bounds objectBounds = new Bounds(
-						new Double3(
-							geometryInfo.getMinBounds().getX(), 
-							geometryInfo.getMinBounds().getY(), 
-							geometryInfo.getMinBounds().getZ()), 
-						new Double3(
-							geometryInfo.getMaxBounds().getX(), 
-							geometryInfo.getMaxBounds().getY(), 
-							geometryInfo.getMaxBounds().getZ()));
+				Bounds objectBounds = new Bounds(geometryInfo.getBounds());
 				modelBounds.integrate(objectBounds);
 				nrObjects++;
 			}
@@ -219,7 +211,7 @@ public class BinaryGeometryMessagingSerializer implements MessagingSerializer {
 					int nrParts = (totalNrIndices + maxIndexValues - 1) / maxIndexValues;
 					dataOutputStream.writeInt(nrParts);
 
-					Bounds objectBounds = new Bounds(geometryInfo.getMinBounds(), geometryInfo.getMaxBounds());
+					Bounds objectBounds = new Bounds(geometryInfo.getBounds().getMin(), geometryInfo.getBounds().getMax());
 					objectBounds.writeTo(dataOutputStream);
 
 					ByteBuffer indicesBuffer = ByteBuffer.wrap(geometryData.getIndices());
@@ -280,7 +272,7 @@ public class BinaryGeometryMessagingSerializer implements MessagingSerializer {
 						dataOutputStream.writeInt(0);
 					}
 				} else {
-					Bounds objectBounds = new Bounds(geometryInfo.getMinBounds(), geometryInfo.getMaxBounds());
+					Bounds objectBounds = new Bounds(geometryInfo.getBounds().getMin(), geometryInfo.getBounds().getMax());
 					objectBounds.writeTo(dataOutputStream);
 					
 					dataOutputStream.writeLong(geometryData.getOid());
