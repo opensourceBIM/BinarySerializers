@@ -70,9 +70,11 @@ public class BinaryGeometryMessagingStreamingSerializer implements MessagingStre
 	 *  - Added integer value that indicates how many times geometry is being reused
 	 *  Version 14:
 	 *  - Added ifcproduct oid to simplify client-side operations, also added type of object, also added type for GeometryData
+	 *  Version 15:
+	 *  - Also sending a multiplier to convert to mm
 	 */
 	
-	private static final byte FORMAT_VERSION = 14;
+	private static final byte FORMAT_VERSION = 15;
 	
 	private enum Mode {
 		LOAD,
@@ -103,6 +105,7 @@ public class BinaryGeometryMessagingStreamingSerializer implements MessagingStre
 	private boolean useSingleColors = false;
 	private boolean quantitizeNormals = false;
 	private boolean quantitizeVertices = false;
+	private boolean normalizeUnitsToMM = true;
 	private float[] vertexQuantizationMatrix;
 	
 	private Mode mode = Mode.LOAD;
@@ -115,9 +118,8 @@ public class BinaryGeometryMessagingStreamingSerializer implements MessagingStre
 	private int nrObjectsWritten;
 	private int size;
 
-	private Bounds modelBounds;
-
-	private Bounds modelBoundsUntranslated;
+//	private Bounds modelBounds;
+//	private Bounds modelBoundsUntranslated;
 
 	@Override
 	public void init(ObjectProvider objectProvider, ProjectInfo projectInfo, PluginManagerInterface pluginManager, PackageMetaData packageMetaData) throws SerializerException {
@@ -127,12 +129,11 @@ public class BinaryGeometryMessagingStreamingSerializer implements MessagingStre
 		if (queryNode.has("geometrySettings")) {
 			ObjectNode geometrySettings = (ObjectNode) queryNode.get("geometrySettings");
 			
-			System.out.println(geometrySettings.toString());
-			
 			useSingleColors = geometrySettings.has("useSingleColorPerObject") && geometrySettings.get("useSingleColorPerObject").asBoolean();
 			splitGeometry = geometrySettings.has("splitGeometry") && geometrySettings.get("splitGeometry").asBoolean();
 			quantitizeNormals = geometrySettings.has("quantitizeNormals") && geometrySettings.get("quantitizeNormals").asBoolean();
 			quantitizeVertices = geometrySettings.has("quantitizeVertices") && geometrySettings.get("quantitizeVertices").asBoolean();
+			normalizeUnitsToMM = geometrySettings.has("normalizeUnitsToMM") && geometrySettings.get("normalizeUnitsToMM").asBoolean();
 			if (quantitizeVertices) {
 				vertexQuantizationMatrix = new float[16];
 				ArrayNode vqmNode = (ArrayNode) geometrySettings.get("vertexQuantizationMatrix");
@@ -224,19 +225,30 @@ public class BinaryGeometryMessagingStreamingSerializer implements MessagingStre
 		// Version of the current format being outputted, should be changed for every (released) change in protocol 
 		serializerDataOutputStream.writeByte(FORMAT_VERSION);
 		
+		serializerDataOutputStream.writeFloat(projectInfo.getMultiplierToMm());
 		serializerDataOutputStream.align8();
 
 		SVector3f minBounds = projectInfo.getMinBounds();
-		serializerDataOutputStream.writeDouble(minBounds.getX());
-		serializerDataOutputStream.writeDouble(minBounds.getY());
-		serializerDataOutputStream.writeDouble(minBounds.getZ());
 		SVector3f maxBounds = projectInfo.getMaxBounds();
-		serializerDataOutputStream.writeDouble(maxBounds.getX());
-		serializerDataOutputStream.writeDouble(maxBounds.getY());
-		serializerDataOutputStream.writeDouble(maxBounds.getZ());
 		
-		modelBounds = new Bounds(minBounds, maxBounds);
-		modelBoundsUntranslated = new Bounds(projectInfo.getBoundsUntranslated());
+		if (normalizeUnitsToMM && projectInfo.getMultiplierToMm() != 1f) {
+			serializerDataOutputStream.writeDouble(minBounds.getX() * projectInfo.getMultiplierToMm());
+			serializerDataOutputStream.writeDouble(minBounds.getY() * projectInfo.getMultiplierToMm());
+			serializerDataOutputStream.writeDouble(minBounds.getZ() * projectInfo.getMultiplierToMm());
+			serializerDataOutputStream.writeDouble(maxBounds.getX() * projectInfo.getMultiplierToMm());
+			serializerDataOutputStream.writeDouble(maxBounds.getY() * projectInfo.getMultiplierToMm());
+			serializerDataOutputStream.writeDouble(maxBounds.getZ() * projectInfo.getMultiplierToMm());
+		} else {
+			serializerDataOutputStream.writeDouble(minBounds.getX());
+			serializerDataOutputStream.writeDouble(minBounds.getY());
+			serializerDataOutputStream.writeDouble(minBounds.getZ());
+			serializerDataOutputStream.writeDouble(maxBounds.getX());
+			serializerDataOutputStream.writeDouble(maxBounds.getY());
+			serializerDataOutputStream.writeDouble(maxBounds.getZ());
+		}
+		
+//		modelBounds = new Bounds(minBounds, maxBounds);
+//		modelBoundsUntranslated = new Bounds(projectInfo.getBoundsUntranslated());
 	}
 
 	private boolean writeData() throws IOException, SerializerException {
@@ -267,6 +279,15 @@ public class BinaryGeometryMessagingStreamingSerializer implements MessagingStre
 			Double maxX = (Double) maxBounds.eGet("x");
 			Double maxY = (Double) maxBounds.eGet("y");
 			Double maxZ = (Double) maxBounds.eGet("z");
+			
+			if (normalizeUnitsToMM && projectInfo.getMultiplierToMm() != 1f) {
+				minX = minX * projectInfo.getMultiplierToMm();
+				minY = minY * projectInfo.getMultiplierToMm();
+				minZ = minZ * projectInfo.getMultiplierToMm();
+				maxX = maxX * projectInfo.getMultiplierToMm();
+				maxY = maxY * projectInfo.getMultiplierToMm();
+				maxZ = maxZ * projectInfo.getMultiplierToMm();
+			}
 			
 			serializerDataOutputStream.ensureExtraCapacity(8 * 6 + ((byte[])transformation).length + 8);
 			serializerDataOutputStream.writeDoubleUnchecked(minX);
@@ -492,6 +513,7 @@ public class BinaryGeometryMessagingStreamingSerializer implements MessagingStre
 				indicesBuffer.order(ByteOrder.LITTLE_ENDIAN);
 				serializerDataOutputStream.writeInt(indicesBuffer.capacity() / 4);
 				IntBuffer intBuffer = indicesBuffer.asIntBuffer();
+				serializerDataOutputStream.ensureExtraCapacity(intBuffer.capacity() * 4);
 				for (int i=0; i<intBuffer.capacity(); i++) {
 					serializerDataOutputStream.writeIntUnchecked(intBuffer.get());
 				}
@@ -520,23 +542,33 @@ public class BinaryGeometryMessagingStreamingSerializer implements MessagingStre
 				if (quantitizeVertices) {
 					vertexByteBuffer.order(ByteOrder.LITTLE_ENDIAN);
 					serializerDataOutputStream.ensureExtraCapacity(vertexByteBuffer.capacity() * 6 / 4);
+					float[] vertex = new float[4];
+					float[] result = new float[4];
+					vertex[3] = 1;
 					for (int i=0; i<vertexByteBuffer.capacity() / 4; i+=3) {
-						float[] vertex = new float[]{vertexByteBuffer.getFloat(), vertexByteBuffer.getFloat(), vertexByteBuffer.getFloat(), 1};
+						vertex[0] = vertexByteBuffer.getFloat();
+						vertex[1] = vertexByteBuffer.getFloat();
+						vertex[2] = vertexByteBuffer.getFloat();
 						
-						if (!modelBoundsUntranslated.in(vertex)) {
-							LOGGER.error("Untranslated vertex outside of Untranslated model bounds, something must have gone wrong in generation");
-							LOGGER.error(vertex[0] + ", " + vertex[1] + ", " + vertex[2]);
-							LOGGER.error(modelBoundsUntranslated.toString());
+						if (normalizeUnitsToMM && projectInfo.getMultiplierToMm() != 1f) {
+							vertex[0] = vertex[0] * projectInfo.getMultiplierToMm();
+							vertex[1] = vertex[1] * projectInfo.getMultiplierToMm();
+							vertex[2] = vertex[2] * projectInfo.getMultiplierToMm();
 						}
 						
-						float[] result = new float[4];
+//						if (!modelBoundsUntranslated.in(vertex)) {
+//							LOGGER.error("Untranslated vertex outside of Untranslated model bounds, something must have gone wrong in generation");
+//							LOGGER.error(vertex[0] + ", " + vertex[1] + ", " + vertex[2]);
+//							LOGGER.error(modelBoundsUntranslated.toString());
+//						}
+						
 						Matrix.multiplyMV(result, 0, vertexQuantizationMatrix, 0, vertex, 0);
 						
-						for (float f : result) {
-							if (f > Short.MAX_VALUE || f < Short.MIN_VALUE) {
-								LOGGER.error("Result of multiplication too large: " + f);
-							}
-						}
+//						for (float f : result) {
+//							if (f > Short.MAX_VALUE || f < Short.MIN_VALUE) {
+//								LOGGER.error("Result of multiplication too large: " + f);
+//							}
+//						}
 						
 						serializerDataOutputStream.writeShortUnchecked((short)result[0]);
 						serializerDataOutputStream.writeShortUnchecked((short)result[1]);
@@ -544,7 +576,23 @@ public class BinaryGeometryMessagingStreamingSerializer implements MessagingStre
 					}
 					serializerDataOutputStream.align8();
 				} else {
-					serializerDataOutputStream.write(vertexByteBuffer.array());
+					if (normalizeUnitsToMM && projectInfo.getMultiplierToMm() != 1f) {
+						vertexByteBuffer.order(ByteOrder.LITTLE_ENDIAN);
+						float[] vertex = new float[3];
+						for (int i=0; i<vertexByteBuffer.capacity() / 4; i+=3) {
+							vertex[0] = vertexByteBuffer.getFloat();
+							vertex[1] = vertexByteBuffer.getFloat();
+							vertex[2] = vertexByteBuffer.getFloat();
+							vertex[0] = vertex[0] * projectInfo.getMultiplierToMm();
+							vertex[1] = vertex[1] * projectInfo.getMultiplierToMm();
+							vertex[2] = vertex[2] * projectInfo.getMultiplierToMm();
+							serializerDataOutputStream.writeFloat(vertex[0]);
+							serializerDataOutputStream.writeFloat(vertex[1]);
+							serializerDataOutputStream.writeFloat(vertex[2]);
+						}
+					} else {
+						serializerDataOutputStream.write(vertexByteBuffer.array());
+					}
 				}
 				
 				ByteBuffer normalsBuffer = ByteBuffer.wrap(normals);
