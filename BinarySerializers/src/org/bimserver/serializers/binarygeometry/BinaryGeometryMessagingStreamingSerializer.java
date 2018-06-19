@@ -103,8 +103,8 @@ public class BinaryGeometryMessagingStreamingSerializer implements MessagingStre
 
 	private boolean splitGeometry = false;
 	private boolean useSingleColors = false;
-	private boolean quantitizeNormals = false;
-	private boolean quantitizeVertices = false;
+	private boolean quantizeNormals = false;
+	private boolean quantizeVertices = false;
 	private boolean normalizeUnitsToMM = true;
 	private float[] vertexQuantizationMatrix;
 	
@@ -126,15 +126,15 @@ public class BinaryGeometryMessagingStreamingSerializer implements MessagingStre
 		this.objectProvider = objectProvider;
 		this.projectInfo = projectInfo;
 		ObjectNode queryNode = objectProvider.getQueryNode();
-		if (queryNode.has("geometrySettings")) {
-			ObjectNode geometrySettings = (ObjectNode) queryNode.get("geometrySettings");
+		if (queryNode.has("loaderSettings")) {
+			ObjectNode geometrySettings = (ObjectNode) queryNode.get("loaderSettings");
 			
-			useSingleColors = geometrySettings.has("useSingleColorPerObject") && geometrySettings.get("useSingleColorPerObject").asBoolean();
+			useSingleColors = geometrySettings.has("useObjectColors") && geometrySettings.get("useObjectColors").asBoolean();
 			splitGeometry = geometrySettings.has("splitGeometry") && geometrySettings.get("splitGeometry").asBoolean();
-			quantitizeNormals = geometrySettings.has("quantitizeNormals") && geometrySettings.get("quantitizeNormals").asBoolean();
-			quantitizeVertices = geometrySettings.has("quantitizeVertices") && geometrySettings.get("quantitizeVertices").asBoolean();
+			quantizeNormals = geometrySettings.has("quantizeNormals") && geometrySettings.get("quantizeNormals").asBoolean();
+			quantizeVertices = geometrySettings.has("quantizeVertices") && geometrySettings.get("quantizeVertices").asBoolean();
 			normalizeUnitsToMM = geometrySettings.has("normalizeUnitsToMM") && geometrySettings.get("normalizeUnitsToMM").asBoolean();
-			if (quantitizeVertices) {
+			if (quantizeVertices) {
 				vertexQuantizationMatrix = new float[16];
 				ArrayNode vqmNode = (ArrayNode) geometrySettings.get("vertexQuantizationMatrix");
 				int i=0;
@@ -539,7 +539,7 @@ public class BinaryGeometryMessagingStreamingSerializer implements MessagingStre
 
 				ByteBuffer vertexByteBuffer = ByteBuffer.wrap(vertices);
 				serializerDataOutputStream.writeInt(vertexByteBuffer.capacity() / 4);
-				if (quantitizeVertices) {
+				if (quantizeVertices) {
 					vertexByteBuffer.order(ByteOrder.LITTLE_ENDIAN);
 					serializerDataOutputStream.ensureExtraCapacity(vertexByteBuffer.capacity() * 6 / 4);
 					float[] vertex = new float[4];
@@ -597,7 +597,7 @@ public class BinaryGeometryMessagingStreamingSerializer implements MessagingStre
 				
 				ByteBuffer normalsBuffer = ByteBuffer.wrap(normals);
 				serializerDataOutputStream.writeInt(normalsBuffer.capacity() / 4);
-				if (quantitizeNormals) {
+				if (quantizeNormals) {
 					normalsBuffer.order(ByteOrder.LITTLE_ENDIAN);
 					for (int i=0; i<normalsBuffer.capacity() / 4; i++) {
 						float normal = normalsBuffer.getFloat();
