@@ -101,11 +101,11 @@ public class BinaryGeometryMessagingStreamingSerializer implements MessagingStre
 		}
 	}
 
-	private boolean splitGeometry = false;
+	private boolean splitGeometry = true;
 	private boolean useSingleColors = false;
 	private boolean quantizeNormals = false;
 	private boolean quantizeVertices = false;
-	private boolean normalizeUnitsToMM = true;
+	private boolean normalizeUnitsToMM = false;
 	private float[] vertexQuantizationMatrix;
 	
 	private Mode mode = Mode.LOAD;
@@ -527,7 +527,7 @@ public class BinaryGeometryMessagingStreamingSerializer implements MessagingStre
 					serializerDataOutputStream.writeFloat((float)color.eGet("w"));
 				} else {
 					if (useSingleColors && mostUsedColor != null) {
-						serializerDataOutputStream.writeInt(1);
+ 						serializerDataOutputStream.writeInt(1);
 						serializerDataOutputStream.writeFloat((float)mostUsedColor.eGet("x"));
 						serializerDataOutputStream.writeFloat((float)mostUsedColor.eGet("y"));
 						serializerDataOutputStream.writeFloat((float)mostUsedColor.eGet("z"));
