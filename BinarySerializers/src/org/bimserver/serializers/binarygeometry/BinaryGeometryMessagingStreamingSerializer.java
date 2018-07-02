@@ -23,6 +23,9 @@ import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.nio.FloatBuffer;
 import java.nio.IntBuffer;
+import java.util.HashMap;
+import java.util.Iterator;
+import java.util.Map;
 
 import org.bimserver.BimserverDatabaseException;
 import org.bimserver.database.queries.om.QueryException;
@@ -106,7 +109,9 @@ public class BinaryGeometryMessagingStreamingSerializer implements MessagingStre
 	private boolean quantizeNormals = false;
 	private boolean quantizeVertices = false;
 	private boolean normalizeUnitsToMM = false;
-	private float[] vertexQuantizationMatrix;
+	private boolean useSmallInts = true;
+	private boolean reportProgress;
+	private Map<Long, float[]> vertexQuantizationMatrices;
 	
 	private Mode mode = Mode.LOAD;
 	private long splitCounter = 0;
@@ -117,6 +122,7 @@ public class BinaryGeometryMessagingStreamingSerializer implements MessagingStre
 	private ProgressReporter progressReporter;
 	private int nrObjectsWritten;
 	private int size;
+
 
 //	private Bounds modelBounds;
 //	private Bounds modelBoundsUntranslated;
@@ -134,12 +140,22 @@ public class BinaryGeometryMessagingStreamingSerializer implements MessagingStre
 			quantizeNormals = geometrySettings.has("quantizeNormals") && geometrySettings.get("quantizeNormals").asBoolean();
 			quantizeVertices = geometrySettings.has("quantizeVertices") && geometrySettings.get("quantizeVertices").asBoolean();
 			normalizeUnitsToMM = geometrySettings.has("normalizeUnitsToMM") && geometrySettings.get("normalizeUnitsToMM").asBoolean();
+			reportProgress = !geometrySettings.has("reportProgress") || geometrySettings.get("reportProgress").asBoolean(); // default is true for backwards compat
+			useSmallInts = !geometrySettings.has("useSmallInts") || geometrySettings.get("useSmallInts").asBoolean(); // default is true for backwards compat
 			if (quantizeVertices) {
-				vertexQuantizationMatrix = new float[16];
-				ArrayNode vqmNode = (ArrayNode) geometrySettings.get("vertexQuantizationMatrix");
-				int i=0;
-				for (JsonNode v : vqmNode) {
-					vertexQuantizationMatrix[i++] = v.floatValue();
+				ObjectNode vqmNode = (ObjectNode) geometrySettings.get("vertexQuantizationMatrices");
+				Iterator<String> fieldNames = vqmNode.fieldNames();
+				while (fieldNames.hasNext()) {
+					String key = fieldNames.next();
+					long roid = Long.parseLong(key);
+					float[] vertexQuantizationMatrix = new float[16];
+					ArrayNode mNode = (ArrayNode) vqmNode.get(key);
+					vertexQuantizationMatrices = new HashMap<>();
+					vertexQuantizationMatrices.put(roid, vertexQuantizationMatrix);
+					int i=0;
+					for (JsonNode v : mNode) {
+						vertexQuantizationMatrix[i++] = v.floatValue();
+					}
 				}
 			}
 		}
@@ -185,26 +201,30 @@ public class BinaryGeometryMessagingStreamingSerializer implements MessagingStre
 
 	private void load() throws SerializerException {
 //		long start = System.nanoTime();
-		size = 0;
-		HashMapVirtualObject next = null;
-		try {
-			next = objectProvider.next();
-			while (next != null) {
-				if (next.eClass() == GeometryPackage.eINSTANCE.getGeometryInfo()) {
-					size++;
-				}
+		if (reportProgress) {
+			size = 0;
+			HashMapVirtualObject next = null;
+			try {
 				next = objectProvider.next();
+				while (next != null) {
+					if (next.eClass() == GeometryPackage.eINSTANCE.getGeometryInfo()) {
+						size++;
+					}
+					next = objectProvider.next();
+				}
+			} catch (BimserverDatabaseException e) {
+				throw new SerializerException(e);
 			}
-		} catch (BimserverDatabaseException e) {
-			throw new SerializerException(e);
+			try {
+				objectProvider = objectProvider.copy();
+			} catch (IOException e) {
+				e.printStackTrace();
+			} catch (QueryException e) {
+				e.printStackTrace();
+			}
 		}
 		try {
-			objectProvider = objectProvider.copy();
 			this.next = objectProvider.next();
-		} catch (IOException e) {
-			e.printStackTrace();
-		} catch (QueryException e) {
-			e.printStackTrace();
 		} catch (BimserverDatabaseException e) {
 			e.printStackTrace();
 		}
@@ -300,8 +320,10 @@ public class BinaryGeometryMessagingStreamingSerializer implements MessagingStre
 			serializerDataOutputStream.writeLongUnchecked((Long)dataOid);
 			
 			nrObjectsWritten++;
-			if (progressReporter != null) {
-				progressReporter.update(nrObjectsWritten, size);
+			if (reportProgress) {
+				if (progressReporter != null) {
+					progressReporter.update(nrObjectsWritten, size);
+				}
 			}
 		} else if (GeometryPackage.eINSTANCE.getGeometryData() == next.eClass()) {
 			HashMapVirtualObject data = next;
@@ -453,16 +475,23 @@ public class BinaryGeometryMessagingStreamingSerializer implements MessagingStre
 					serializerDataOutputStream.writeUTF(type);
 					serializerDataOutputStream.align8();
 					
+					long roid = data.getRoid();
+					serializerDataOutputStream.writeLong(roid);
 					serializerDataOutputStream.writeLong((boolean)data.eGet(hasTransparencyFeature) ? 1 : 0);
 					serializerDataOutputStream.writeLong(data.getOid());
 					
 					ByteBuffer indicesBuffer = ByteBuffer.wrap(indices);
 					indicesBuffer.order(ByteOrder.LITTLE_ENDIAN);
+					
 					serializerDataOutputStream.writeInt(indicesBuffer.capacity() / 4);
-					IntBuffer intBuffer = indicesBuffer.asIntBuffer();
-					serializerDataOutputStream.ensureExtraCapacity(intBuffer.capacity());
-					for (int i=0; i<intBuffer.capacity(); i++) {
-						serializerDataOutputStream.writeShortUnchecked((short)intBuffer.get());
+					if (useSmallInts) {
+						IntBuffer intBuffer = indicesBuffer.asIntBuffer();
+						serializerDataOutputStream.ensureExtraCapacity(intBuffer.capacity() * 2);
+						for (int i=0; i<intBuffer.capacity(); i++) {
+							serializerDataOutputStream.writeShortUnchecked((short) intBuffer.get());
+						}
+					} else {
+						serializerDataOutputStream.write(indicesBuffer.array());
 					}
 					
 					// Added in version 11
@@ -505,6 +534,8 @@ public class BinaryGeometryMessagingStreamingSerializer implements MessagingStre
 				String type = objectProvider.getEClassForCid(cid).getName();
 				serializerDataOutputStream.writeUTF(type);
 				serializerDataOutputStream.align8();
+				long roid = data.getRoid();
+				serializerDataOutputStream.writeLong(roid);
 
 				serializerDataOutputStream.writeLong((boolean)data.eGet(hasTransparencyFeature) ? 1 : 0);
 				serializerDataOutputStream.writeLong(data.getOid());
@@ -512,10 +543,14 @@ public class BinaryGeometryMessagingStreamingSerializer implements MessagingStre
 				ByteBuffer indicesBuffer = ByteBuffer.wrap(indices);
 				indicesBuffer.order(ByteOrder.LITTLE_ENDIAN);
 				serializerDataOutputStream.writeInt(indicesBuffer.capacity() / 4);
-				IntBuffer intBuffer = indicesBuffer.asIntBuffer();
-				serializerDataOutputStream.ensureExtraCapacity(intBuffer.capacity() * 4);
-				for (int i=0; i<intBuffer.capacity(); i++) {
-					serializerDataOutputStream.writeIntUnchecked(intBuffer.get());
+				if (useSmallInts) {
+					IntBuffer intBuffer = indicesBuffer.asIntBuffer();
+					serializerDataOutputStream.ensureExtraCapacity(intBuffer.capacity() * 2);
+					for (int i=0; i<intBuffer.capacity(); i++) {
+						serializerDataOutputStream.writeShortUnchecked((short) intBuffer.get());
+					}
+				} else {
+					serializerDataOutputStream.write(indicesBuffer.array());
 				}
 
 				// Added in version 11
@@ -562,7 +597,7 @@ public class BinaryGeometryMessagingStreamingSerializer implements MessagingStre
 //							LOGGER.error(modelBoundsUntranslated.toString());
 //						}
 						
-						Matrix.multiplyMV(result, 0, vertexQuantizationMatrix, 0, vertex, 0);
+						Matrix.multiplyMV(result, 0, vertexQuantizationMatrices.get(roid), 0, vertex, 0);
 						
 //						for (float f : result) {
 //							if (f > Short.MAX_VALUE || f < Short.MIN_VALUE) {
@@ -619,6 +654,16 @@ public class BinaryGeometryMessagingStreamingSerializer implements MessagingStre
 					serializerDataOutputStream.writeInt(0);
 				}
 			}
+		} else {
+			if (next.eClass().getName().equals("IfcAnnotation")) {
+				System.out.println(next.hashCode());
+			}
+			try {
+				next = objectProvider.next();
+			} catch (BimserverDatabaseException e) {
+				e.printStackTrace();
+			}
+			return writeData();
 		}
 		try {
 			next = objectProvider.next();
