@@ -342,6 +342,7 @@ public class BinaryGeometryMessagingStreamingSerializer implements MessagingStre
 		serializerDataOutputStream.writeFloat(projectInfo.getMultiplierToMm());
 		serializerDataOutputStream.align8();
 
+		// TODO These are known to be wrong for multi-roid queries
 		SVector3f minBounds = projectInfo.getMinBounds();
 		SVector3f maxBounds = projectInfo.getMaxBounds();
 		
@@ -930,14 +931,15 @@ public class BinaryGeometryMessagingStreamingSerializer implements MessagingStre
 				}
 
 				ByteBuffer vertexByteBuffer = ByteBuffer.wrap(vertices);
-				serializerDataOutputStream.writeInt(vertexByteBuffer.capacity() / 4);
+				int nrPos = vertexByteBuffer.capacity() / 4;
+				serializerDataOutputStream.writeInt(nrPos);
 				if (quantizeVertices) {
 					vertexByteBuffer.order(ByteOrder.LITTLE_ENDIAN);
 					serializerDataOutputStream.ensureExtraCapacity(vertexByteBuffer.capacity() * 6 / 4);
 					float[] vertex = new float[4];
 					float[] result = new float[4];
 					vertex[3] = 1;
-					for (int i=0; i<vertexByteBuffer.capacity() / 4; i+=3) {
+					for (int i=0; i<nrPos; i+=3) {
 						vertex[0] = vertexByteBuffer.getFloat();
 						vertex[1] = vertexByteBuffer.getFloat();
 						vertex[2] = vertexByteBuffer.getFloat();
@@ -964,7 +966,7 @@ public class BinaryGeometryMessagingStreamingSerializer implements MessagingStre
 					if (normalizeUnitsToMM && projectInfo.getMultiplierToMm() != 1f) {
 						vertexByteBuffer.order(ByteOrder.LITTLE_ENDIAN);
 						float[] vertex = new float[3];
-						for (int i=0; i<vertexByteBuffer.capacity() / 4; i+=3) {
+						for (int i=0; i<nrPos; i+=3) {
 							vertex[0] = vertexByteBuffer.getFloat();
 							vertex[1] = vertexByteBuffer.getFloat();
 							vertex[2] = vertexByteBuffer.getFloat();
