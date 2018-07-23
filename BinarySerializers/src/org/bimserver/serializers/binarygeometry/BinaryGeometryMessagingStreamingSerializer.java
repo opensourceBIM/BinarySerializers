@@ -1020,10 +1020,7 @@ public class BinaryGeometryMessagingStreamingSerializer implements MessagingStre
 						quantizedColor[3] = UnsignedBytes.checkedCast((long)((float)color.eGet("w") * 255f));
 						for (int i=0; i<nrVertices; i++) {
 							if (quantizeColors) {
-								serializerDataOutputStream.writeByte(quantizedColor[0]);
-								serializerDataOutputStream.writeByte(quantizedColor[1]);
-								serializerDataOutputStream.writeByte(quantizedColor[2]);
-								serializerDataOutputStream.writeByte(quantizedColor[3]);
+								serializerDataOutputStream.writeUnchecked(quantizedColor, 0, 4);
 							} else {
 								serializerDataOutputStream.writeFloatUnchecked((float) color.eGet("x"));
 								serializerDataOutputStream.writeFloatUnchecked((float) color.eGet("y"));
