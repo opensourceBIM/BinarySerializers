@@ -56,6 +56,7 @@ import org.slf4j.LoggerFactory;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.google.common.primitives.UnsignedBytes;
 
 public class BinaryGeometryMessagingStreamingSerializer implements MessagingStreamingSerializer {
 	private static final Logger LOGGER = LoggerFactory.getLogger(BinaryGeometryMessagingStreamingSerializer.class);
@@ -114,6 +115,7 @@ public class BinaryGeometryMessagingStreamingSerializer implements MessagingStre
 	private boolean useSingleColors = false;
 	private boolean quantizeNormals = false;
 	private boolean quantizeVertices = false;
+	private boolean quantizeColors = false;
 	private boolean normalizeUnitsToMM = false;
 	private boolean useSmallInts = true;
 	private boolean splitTriangles = false;
@@ -166,6 +168,7 @@ public class BinaryGeometryMessagingStreamingSerializer implements MessagingStre
 			splitGeometry = geometrySettings.has("splitGeometry") && geometrySettings.get("splitGeometry").asBoolean();
 			quantizeNormals = geometrySettings.has("quantizeNormals") && geometrySettings.get("quantizeNormals").asBoolean();
 			quantizeVertices = geometrySettings.has("quantizeVertices") && geometrySettings.get("quantizeVertices").asBoolean();
+			quantizeColors = geometrySettings.has("quantizeColors") && geometrySettings.get("quantizeColors").asBoolean();
 			normalizeUnitsToMM = geometrySettings.has("normalizeUnitsToMM") && geometrySettings.get("normalizeUnitsToMM").asBoolean();
 			reportProgress = !geometrySettings.has("reportProgress") || geometrySettings.get("reportProgress").asBoolean(); // default is true for backwards compat
 			useSmallInts = !geometrySettings.has("useSmallInts") || geometrySettings.get("useSmallInts").asBoolean(); // default is true for backwards compat
@@ -390,7 +393,7 @@ public class BinaryGeometryMessagingStreamingSerializer implements MessagingStre
 		return next != null;
 	}
 
-	private void writeGeometryInfo(HashMapVirtualObject info) throws IOException {
+	private void writeGeometryInfo(HashMapVirtualObject info) throws IOException, SerializerException {
 		EStructuralFeature hasTransparencyFeature = info.eClass().getEStructuralFeature("hasTransparency");
 		byte[] transformation = (byte[]) info.eGet(info.eClass().getEStructuralFeature("transformation"));
 		long dataOid = (long) info.eGet(info.eClass().getEStructuralFeature("data"));
@@ -437,9 +440,9 @@ public class BinaryGeometryMessagingStreamingSerializer implements MessagingStre
 		for (int i=0; i<16; i++) {
 			ms[i] = asDoubleBuffer.get();
 		}
-		if (!Matrix.invertM(inverse , 0, ms, 0)) {
-			System.out.println("NO INVERSE!");
-		}
+//		if (!Matrix.invertM(inverse , 0, ms, 0)) {
+//			System.out.println("NO INVERSE!");
+//		}
 		
 		serializerDataOutputStream.write(transformation);
 		
@@ -467,7 +470,7 @@ public class BinaryGeometryMessagingStreamingSerializer implements MessagingStre
 		}
 	}
 
-	private void writeGeometryData(HashMapVirtualObject data, long oid) throws IOException {
+	private void writeGeometryData(HashMapVirtualObject data, long oid) throws IOException, SerializerException {
 		// This geometry info is pointing to a not-yet-sent geometry data, so we send that first
 		// This way the client can be sure that geometry data is always available when geometry info is received, simplifying bookkeeping
 		EStructuralFeature indicesFeature = data.eClass().getEStructuralFeature("indices");
@@ -872,6 +875,7 @@ public class BinaryGeometryMessagingStreamingSerializer implements MessagingStre
 						v[1] = v[1] / projectInfo.getMultiplierToMm();
 						v[2] = v[2] / projectInfo.getMultiplierToMm();
 					}
+					// TODO !!!! When the inverse is not valid, we need to do something with this information
 					Matrix.multiplyMV(r, 0, inverse, 0, v, 0);
 					if (normalizeUnitsToMM && projectInfo.getMultiplierToMm() != 1f) {
 						r[0] = r[0] * projectInfo.getMultiplierToMm();
@@ -997,16 +1001,51 @@ public class BinaryGeometryMessagingStreamingSerializer implements MessagingStre
 					serializerDataOutputStream.write(normalsBuffer.array());
 				}
 				
-				// Only when materials are used we send them
-				if (!useSingleColors && materials != null && color == null) {
-					ByteBuffer materialsByteBuffer = ByteBuffer.wrap(materials);
-					
-					serializerDataOutputStream.writeInt(materialsByteBuffer.capacity() / 4);
-					serializerDataOutputStream.write(materialsByteBuffer.array());
-				} else {
-					// No materials used
+				if (useSingleColors) {
 					serializerDataOutputStream.writeInt(0);
-				}					
+				} else {
+					if (materials == null) {
+						// We need to generate them
+						if (color == null) {
+							// Hmm we need to generate them, but there is no color
+							throw new SerializerException("No color");
+						}
+						int nrVertices = vertices.length / 12;
+						serializerDataOutputStream.writeInt(nrVertices * 4);
+						serializerDataOutputStream.ensureExtraCapacity(nrVertices * 4 * (quantizeColors ? 1 : 4));
+						byte[] quantizedColor = new byte[4];
+						quantizedColor[0] = UnsignedBytes.checkedCast((long)((float)color.eGet("x") * 255f));
+						quantizedColor[1] = UnsignedBytes.checkedCast((long)((float)color.eGet("y") * 255f));
+						quantizedColor[2] = UnsignedBytes.checkedCast((long)((float)color.eGet("z") * 255f));
+						quantizedColor[3] = UnsignedBytes.checkedCast((long)((float)color.eGet("w") * 255f));
+						for (int i=0; i<nrVertices; i++) {
+							if (quantizeColors) {
+								serializerDataOutputStream.writeByte(quantizedColor[0]);
+								serializerDataOutputStream.writeByte(quantizedColor[1]);
+								serializerDataOutputStream.writeByte(quantizedColor[2]);
+								serializerDataOutputStream.writeByte(quantizedColor[3]);
+							} else {
+								serializerDataOutputStream.writeFloatUnchecked((float) color.eGet("x"));
+								serializerDataOutputStream.writeFloatUnchecked((float) color.eGet("y"));
+								serializerDataOutputStream.writeFloatUnchecked((float) color.eGet("z"));
+								serializerDataOutputStream.writeFloatUnchecked((float) color.eGet("w"));
+							}
+						}
+					} else {
+						ByteBuffer materialsByteBuffer = ByteBuffer.wrap(materials);
+						serializerDataOutputStream.writeInt(materialsByteBuffer.capacity());
+						if (quantizeColors) {
+							serializerDataOutputStream.write(materialsByteBuffer.array());
+						} else {
+							serializerDataOutputStream.ensureExtraCapacity(materialsByteBuffer.capacity() * 4);
+							for (int i=0; i<materialsByteBuffer.capacity(); i++) {
+								byte b = materialsByteBuffer.get(i);
+								float f = UnsignedBytes.toInt(b) / 255f;
+								serializerDataOutputStream.writeFloatUnchecked(f);
+							}
+						}
+					}
+				}
 			}
 		}
 	}
