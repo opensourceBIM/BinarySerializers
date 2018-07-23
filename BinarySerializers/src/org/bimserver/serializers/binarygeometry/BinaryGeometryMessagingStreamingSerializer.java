@@ -938,37 +938,44 @@ public class BinaryGeometryMessagingStreamingSerializer implements MessagingStre
 				int nrPos = vertexByteBuffer.capacity() / 4;
 				serializerDataOutputStream.writeInt(nrPos);
 				if (quantizeVertices) {
-					vertexByteBuffer.order(ByteOrder.LITTLE_ENDIAN);
-					serializerDataOutputStream.ensureExtraCapacity(vertexByteBuffer.capacity() * 6 / 4);
-					float[] vertex = new float[4];
-					float[] result = new float[4];
-					vertex[3] = 1;
-					for (int i=0; i<nrPos; i+=3) {
-						vertex[0] = vertexByteBuffer.getFloat();
-						vertex[1] = vertexByteBuffer.getFloat();
-						vertex[2] = vertexByteBuffer.getFloat();
-						
-						if (normalizeUnitsToMM && projectInfo.getMultiplierToMm() != 1f) {
-							vertex[0] = vertex[0] * projectInfo.getMultiplierToMm();
-							vertex[1] = vertex[1] * projectInfo.getMultiplierToMm();
-							vertex[2] = vertex[2] * projectInfo.getMultiplierToMm();
+					if (data.has("verticesQuantized") && normalizeUnitsToMM) {
+						byte[] quantizedVertices = (byte[])data.get("verticesQuantized");
+						serializerDataOutputStream.write(quantizedVertices);
+						serializerDataOutputStream.align8();
+					} else {
+						vertexByteBuffer.order(ByteOrder.LITTLE_ENDIAN);
+						serializerDataOutputStream.ensureExtraCapacity(vertexByteBuffer.capacity() * 6 / 4);
+						float[] vertex = new float[4];
+						float[] result = new float[4];
+						vertex[3] = 1;
+						for (int i=0; i<nrPos; i+=3) {
+							vertex[0] = vertexByteBuffer.getFloat();
+							vertex[1] = vertexByteBuffer.getFloat();
+							vertex[2] = vertexByteBuffer.getFloat();
+							
+							if (normalizeUnitsToMM && projectInfo.getMultiplierToMm() != 1f) {
+								vertex[0] = vertex[0] * projectInfo.getMultiplierToMm();
+								vertex[1] = vertex[1] * projectInfo.getMultiplierToMm();
+								vertex[2] = vertex[2] * projectInfo.getMultiplierToMm();
+							}
+							
+							float[] matrix = vertexQuantizationMatrices.get(roid);
+							if (matrix == null) {
+								LOGGER.error("Missing quant matrix for " + roid);
+								return;
+							}
+							Matrix.multiplyMV(result, 0, matrix, 0, vertex, 0);
+							
+							serializerDataOutputStream.writeShortUnchecked((short)result[0]);
+							serializerDataOutputStream.writeShortUnchecked((short)result[1]);
+							serializerDataOutputStream.writeShortUnchecked((short)result[2]);
 						}
-						
-						float[] matrix = vertexQuantizationMatrices.get(roid);
-						if (matrix == null) {
-							LOGGER.error("Missing quant matrix for " + roid);
-							return;
-						}
-						Matrix.multiplyMV(result, 0, matrix, 0, vertex, 0);
-						
-						serializerDataOutputStream.writeShortUnchecked((short)result[0]);
-						serializerDataOutputStream.writeShortUnchecked((short)result[1]);
-						serializerDataOutputStream.writeShortUnchecked((short)result[2]);
+						serializerDataOutputStream.align8();
 					}
-					serializerDataOutputStream.align8();
 				} else {
 					if (normalizeUnitsToMM && projectInfo.getMultiplierToMm() != 1f) {
 						vertexByteBuffer.order(ByteOrder.LITTLE_ENDIAN);
+						serializerDataOutputStream.ensureExtraCapacity(vertexByteBuffer.capacity() * 6 / 4); // TODO unchecked
 						float[] vertex = new float[3];
 						for (int i=0; i<nrPos; i+=3) {
 							vertex[0] = vertexByteBuffer.getFloat();
@@ -979,9 +986,9 @@ public class BinaryGeometryMessagingStreamingSerializer implements MessagingStre
 							vertex[2] = vertex[2] * projectInfo.getMultiplierToMm();
 							
 							// TODO slow
-							serializerDataOutputStream.writeFloat(vertex[0]);
-							serializerDataOutputStream.writeFloat(vertex[1]);
-							serializerDataOutputStream.writeFloat(vertex[2]);
+							serializerDataOutputStream.writeFloatUnchecked(vertex[0]);
+							serializerDataOutputStream.writeFloatUnchecked(vertex[1]);
+							serializerDataOutputStream.writeFloatUnchecked(vertex[2]);
 						}
 					} else {
 						serializerDataOutputStream.write(vertexByteBuffer.array());
