@@ -1007,8 +1007,8 @@ public class BinaryGeometryMessagingStreamingSerializer implements MessagingStre
 					if (materials == null) {
 						// We need to generate them
 						if (color == null) {
-							// Hmm we need to generate them, but there is no color
-							throw new SerializerException("No color");
+							serializerDataOutputStream.writeInt(0);
+							return;
 						}
 						int nrVertices = vertices.length / 12;
 						serializerDataOutputStream.writeInt(nrVertices * 4);
