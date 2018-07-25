@@ -405,9 +405,10 @@ public class BinaryGeometryMessagingStreamingSerializer implements MessagingStre
 		String type = objectProvider.getEClassForOid(oid).getName();
 		serializerDataOutputStream.writeUTF(type);
 		serializerDataOutputStream.align8();
-		serializerDataOutputStream.writeLong(info.getRoid());
-		serializerDataOutputStream.writeLong(info.getOid());
-		serializerDataOutputStream.writeLong((boolean)info.eGet(hasTransparencyFeature) ? 1 : 0);
+		serializerDataOutputStream.ensureExtraCapacity(24);
+		serializerDataOutputStream.writeLongUnchecked(info.getRoid());
+		serializerDataOutputStream.writeLongUnchecked(info.getOid());
+		serializerDataOutputStream.writeLongUnchecked((boolean)info.eGet(hasTransparencyFeature) ? 1 : 0);
 		HashMapWrappedVirtualObject bounds = (HashMapWrappedVirtualObject) info.eGet(info.eClass().getEStructuralFeature("bounds"));
 		HashMapWrappedVirtualObject minBounds = (HashMapWrappedVirtualObject) bounds.eGet(bounds.eClass().getEStructuralFeature("min"));
 		HashMapWrappedVirtualObject maxBounds = (HashMapWrappedVirtualObject) bounds.eGet(bounds.eClass().getEStructuralFeature("max"));
@@ -1041,30 +1042,33 @@ public class BinaryGeometryMessagingStreamingSerializer implements MessagingStre
 						if (color == null) {
 							serializerDataOutputStream.writeInt(0);
 							return;
-						}
-						int nrVertices = 0;
-						if (vertices == null) {
-							nrVertices = verticesQuantized.length / 6;
 						} else {
-							nrVertices = vertices.length / 12;
+							serializerDataOutputStream.writeInt(0);
+							return;
 						}
-						serializerDataOutputStream.writeInt(nrVertices * 4);
-						serializerDataOutputStream.ensureExtraCapacity(nrVertices * 4 * (quantizeColors ? 1 : 4));
-						byte[] quantizedColor = new byte[4];
-						quantizedColor[0] = UnsignedBytes.checkedCast((long)((float)color.eGet("x") * 255f));
-						quantizedColor[1] = UnsignedBytes.checkedCast((long)((float)color.eGet("y") * 255f));
-						quantizedColor[2] = UnsignedBytes.checkedCast((long)((float)color.eGet("z") * 255f));
-						quantizedColor[3] = UnsignedBytes.checkedCast((long)((float)color.eGet("w") * 255f));
-						for (int i=0; i<nrVertices; i++) {
-							if (quantizeColors) {
-								serializerDataOutputStream.writeUnchecked(quantizedColor, 0, 4);
-							} else {
-								serializerDataOutputStream.writeFloatUnchecked((float) color.eGet("x"));
-								serializerDataOutputStream.writeFloatUnchecked((float) color.eGet("y"));
-								serializerDataOutputStream.writeFloatUnchecked((float) color.eGet("z"));
-								serializerDataOutputStream.writeFloatUnchecked((float) color.eGet("w"));
-							}
-						}
+//						int nrVertices = 0;
+//						if (vertices == null) {
+//							nrVertices = verticesQuantized.length / 6;
+//						} else {
+//							nrVertices = vertices.length / 12;
+//						}
+//						serializerDataOutputStream.writeInt(nrVertices * 4);
+//						serializerDataOutputStream.ensureExtraCapacity(nrVertices * 4 * (quantizeColors ? 1 : 4));
+//						byte[] quantizedColor = new byte[4];
+//						quantizedColor[0] = UnsignedBytes.checkedCast((long)((float)color.eGet("x") * 255f));
+//						quantizedColor[1] = UnsignedBytes.checkedCast((long)((float)color.eGet("y") * 255f));
+//						quantizedColor[2] = UnsignedBytes.checkedCast((long)((float)color.eGet("z") * 255f));
+//						quantizedColor[3] = UnsignedBytes.checkedCast((long)((float)color.eGet("w") * 255f));
+//						for (int i=0; i<nrVertices; i++) {
+//							if (quantizeColors) {
+//								serializerDataOutputStream.writeUnchecked(quantizedColor, 0, 4);
+//							} else {
+//								serializerDataOutputStream.writeFloatUnchecked((float) color.eGet("x"));
+//								serializerDataOutputStream.writeFloatUnchecked((float) color.eGet("y"));
+//								serializerDataOutputStream.writeFloatUnchecked((float) color.eGet("z"));
+//								serializerDataOutputStream.writeFloatUnchecked((float) color.eGet("w"));
+//							}
+//						}
 					} else {
 						ByteBuffer materialsByteBuffer = ByteBuffer.wrap(colors);
 						serializerDataOutputStream.writeInt(materialsByteBuffer.capacity());
