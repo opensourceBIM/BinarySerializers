@@ -476,6 +476,7 @@ public class BinaryGeometryMessagingStreamingSerializer implements MessagingStre
 		// This way the client can be sure that geometry data is always available when geometry info is received, simplifying bookkeeping
 		EStructuralFeature indicesFeature = data.eClass().getEStructuralFeature("indices");
 		EStructuralFeature verticesFeature = data.eClass().getEStructuralFeature("vertices");
+		EStructuralFeature verticesQuantizedFeature = data.eClass().getEStructuralFeature("verticesQuantized");
 		EStructuralFeature normalsFeature = data.eClass().getEStructuralFeature("normals");
 		EStructuralFeature normalsQuantizedFeature = data.eClass().getEStructuralFeature("normalsQuantized");
 		EStructuralFeature colorsFeature = data.eClass().getEStructuralFeature("colorsQuantized");
@@ -484,9 +485,10 @@ public class BinaryGeometryMessagingStreamingSerializer implements MessagingStre
 		EStructuralFeature hasTransparencyFeature = data.eClass().getEStructuralFeature("hasTransparency");
 
 		AbstractHashMapVirtualObject indicesBuffer = data.getDirectFeature(indicesFeature);
-		AbstractHashMapVirtualObject verticesBuffer = data.getDirectFeature(verticesFeature);
 		byte[] normals = null;
 		byte[] normalsQuantized = null;
+		byte[] vertices = null;
+		byte[] verticesQuantized = null;
 		if (quantizeNormals) {
 			AbstractHashMapVirtualObject normalsBuffer = data.getDirectFeature(normalsQuantizedFeature);
 			normalsQuantized = (byte[]) normalsBuffer.get("data");
@@ -494,12 +496,18 @@ public class BinaryGeometryMessagingStreamingSerializer implements MessagingStre
 			AbstractHashMapVirtualObject normalsBuffer = data.getDirectFeature(normalsFeature);
 			normals = (byte[]) normalsBuffer.get("data");
 		}
+		if (quantizeVertices) {
+			AbstractHashMapVirtualObject verticesBuffer = data.getDirectFeature(verticesQuantizedFeature);
+			verticesQuantized = (byte[]) verticesBuffer.get("data");
+		} else {
+			AbstractHashMapVirtualObject verticesBuffer = data.getDirectFeature(verticesFeature);
+			vertices = (byte[]) verticesBuffer.get("data");
+		}
 		AbstractHashMapVirtualObject colorsBuffer = data.getDirectFeature(colorsFeature);
 		HashMapWrappedVirtualObject color = (HashMapWrappedVirtualObject)data.eGet(colorFeature);
 		HashMapWrappedVirtualObject mostUsedColor = (HashMapWrappedVirtualObject)data.eGet(mostUsedColorFeature);
 		
 		byte[] indices = (byte[]) indicesBuffer.get("data");
-		byte[] vertices = (byte[]) verticesBuffer.get("data");
 		byte[] colors = null;
 		if (colorsBuffer != null) {
 			colors = (byte[]) colorsBuffer.get("data");			
@@ -951,15 +959,16 @@ public class BinaryGeometryMessagingStreamingSerializer implements MessagingStre
 					}
 				}
 
-				ByteBuffer vertexByteBuffer = ByteBuffer.wrap(vertices);
-				int nrPos = vertexByteBuffer.capacity() / 4;
-				serializerDataOutputStream.writeInt(nrPos);
 				if (quantizeVertices) {
 					if (data.has("verticesQuantized") && normalizeUnitsToMM) {
-						byte[] quantizedVertices = (byte[])data.get("verticesQuantized");
-						serializerDataOutputStream.write(quantizedVertices);
+						serializerDataOutputStream.writeInt(verticesQuantized.length / 2);
+						serializerDataOutputStream.write(verticesQuantized);
 						serializerDataOutputStream.align8();
 					} else {
+						ByteBuffer vertexByteBuffer = ByteBuffer.wrap(vertices);
+						int nrPos = vertexByteBuffer.capacity() / 4;
+						serializerDataOutputStream.writeInt(nrPos);
+
 						vertexByteBuffer.order(ByteOrder.LITTLE_ENDIAN);
 						serializerDataOutputStream.ensureExtraCapacity(vertexByteBuffer.capacity() * 6 / 4);
 						float[] vertex = new float[4];
@@ -990,6 +999,9 @@ public class BinaryGeometryMessagingStreamingSerializer implements MessagingStre
 						serializerDataOutputStream.align8();
 					}
 				} else {
+					ByteBuffer vertexByteBuffer = ByteBuffer.wrap(vertices);
+					int nrPos = vertexByteBuffer.capacity() / 4;
+					serializerDataOutputStream.writeInt(nrPos);
 					if (normalizeUnitsToMM && projectInfo.getMultiplierToMm() != 1f) {
 						vertexByteBuffer.order(ByteOrder.LITTLE_ENDIAN);
 						serializerDataOutputStream.ensureExtraCapacity(vertexByteBuffer.capacity() * 6 / 4); // TODO unchecked
@@ -1030,7 +1042,12 @@ public class BinaryGeometryMessagingStreamingSerializer implements MessagingStre
 							serializerDataOutputStream.writeInt(0);
 							return;
 						}
-						int nrVertices = vertices.length / 12;
+						int nrVertices = 0;
+						if (vertices == null) {
+							nrVertices = verticesQuantized.length / 6;
+						} else {
+							nrVertices = vertices.length / 12;
+						}
 						serializerDataOutputStream.writeInt(nrVertices * 4);
 						serializerDataOutputStream.ensureExtraCapacity(nrVertices * 4 * (quantizeColors ? 1 : 4));
 						byte[] quantizedColor = new byte[4];
