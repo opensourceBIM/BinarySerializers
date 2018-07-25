@@ -158,7 +158,7 @@ public class BinaryGeometryMessagingSerializer implements MessagingSerializer {
 		if (geometryInfo != null && geometryInfo.getTransformation() != null) {
 			GeometryData geometryData = geometryInfo.getData();
 			
-			int totalNrIndices = geometryData.getIndices().length / 4;
+			int totalNrIndices = geometryData.getIndices().getData().length / 4;
 			int maxIndexValues = 16389;
 			
 			Object reuse = concreteGeometrySent.get(geometryData.getOid());
@@ -214,15 +214,15 @@ public class BinaryGeometryMessagingSerializer implements MessagingSerializer {
 					Bounds objectBounds = new Bounds(geometryInfo.getBounds().getMin(), geometryInfo.getBounds().getMax());
 					objectBounds.writeTo(dataOutputStream);
 
-					ByteBuffer indicesBuffer = ByteBuffer.wrap(geometryData.getIndices());
+					ByteBuffer indicesBuffer = ByteBuffer.wrap(geometryData.getIndices().getData());
 					indicesBuffer.order(ByteOrder.LITTLE_ENDIAN);
 					IntBuffer indicesIntBuffer = indicesBuffer.asIntBuffer();
 
-					ByteBuffer vertexBuffer = ByteBuffer.wrap(geometryData.getVertices());
+					ByteBuffer vertexBuffer = ByteBuffer.wrap(geometryData.getVertices().getData());
 					vertexBuffer.order(ByteOrder.LITTLE_ENDIAN);
 					FloatBuffer verticesFloatBuffer = vertexBuffer.asFloatBuffer();
 					
-					ByteBuffer normalsBuffer = ByteBuffer.wrap(geometryData.getNormals());
+					ByteBuffer normalsBuffer = ByteBuffer.wrap(geometryData.getNormals().getData());
 					normalsBuffer.order(ByteOrder.LITTLE_ENDIAN);
 					FloatBuffer normalsFloatBuffer = normalsBuffer.asFloatBuffer();
 					
@@ -277,24 +277,24 @@ public class BinaryGeometryMessagingSerializer implements MessagingSerializer {
 					
 					dataOutputStream.writeLong(geometryData.getOid());
 					
-					ByteBuffer indicesBuffer = ByteBuffer.wrap(geometryData.getIndices());
+					ByteBuffer indicesBuffer = ByteBuffer.wrap(geometryData.getIndices().getData());
 					dataOutputStream.writeInt(indicesBuffer.capacity() / 4);
 					dataOutputStream.write(indicesBuffer.array());
 					
-					ByteBuffer vertexByteBuffer = ByteBuffer.wrap(geometryData.getVertices());
+					ByteBuffer vertexByteBuffer = ByteBuffer.wrap(geometryData.getVertices().getData());
 					dataOutputStream.writeInt(vertexByteBuffer.capacity() / 4);
 					dataOutputStream.write(vertexByteBuffer.array());
 					
-					ByteBuffer normalsBuffer = ByteBuffer.wrap(geometryData.getNormals());
+					ByteBuffer normalsBuffer = ByteBuffer.wrap(geometryData.getNormals().getData());
 					dataOutputStream.writeInt(normalsBuffer.capacity() / 4);
 					dataOutputStream.write(normalsBuffer.array());
 					
 					// Only when materials are used we send them
-					if (geometryData.getMaterials() != null) {
-						ByteBuffer materialsByteBuffer = ByteBuffer.wrap(geometryData.getMaterials());
+					if (geometryData.getColor() != null) {
+						ByteBuffer colorsByteBuffer = ByteBuffer.wrap(geometryData.getColorsQuantized().getData());
 						
-						dataOutputStream.writeInt(materialsByteBuffer.capacity() / 4);
-						dataOutputStream.write(materialsByteBuffer.array());
+						dataOutputStream.writeInt(colorsByteBuffer.capacity() / 4);
+						dataOutputStream.write(colorsByteBuffer.array());
 					} else {
 						// No materials used
 						dataOutputStream.writeInt(0);

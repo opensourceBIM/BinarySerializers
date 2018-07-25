@@ -47,6 +47,7 @@ import org.bimserver.plugins.serializers.SerializerException;
 import org.bimserver.serializers.binarygeometry.clipping.Edge;
 import org.bimserver.serializers.binarygeometry.clipping.Point;
 import org.bimserver.serializers.binarygeometry.clipping.PolygonClipping;
+import org.bimserver.shared.AbstractHashMapVirtualObject;
 import org.bimserver.shared.HashMapVirtualObject;
 import org.bimserver.shared.HashMapWrappedVirtualObject;
 import org.eclipse.emf.ecore.EStructuralFeature;
@@ -476,17 +477,33 @@ public class BinaryGeometryMessagingStreamingSerializer implements MessagingStre
 		EStructuralFeature indicesFeature = data.eClass().getEStructuralFeature("indices");
 		EStructuralFeature verticesFeature = data.eClass().getEStructuralFeature("vertices");
 		EStructuralFeature normalsFeature = data.eClass().getEStructuralFeature("normals");
-		EStructuralFeature materialsFeature = data.eClass().getEStructuralFeature("materials");
+		EStructuralFeature normalsQuantizedFeature = data.eClass().getEStructuralFeature("normalsQuantized");
+		EStructuralFeature colorsFeature = data.eClass().getEStructuralFeature("colorsQuantized");
 		EStructuralFeature colorFeature = data.eClass().getEStructuralFeature("color");
 		EStructuralFeature mostUsedColorFeature = data.eClass().getEStructuralFeature("mostUsedColor");
 		EStructuralFeature hasTransparencyFeature = data.eClass().getEStructuralFeature("hasTransparency");
-		
-		byte[] indices = (byte[])data.eGet(indicesFeature);
-		byte[] vertices = (byte[])data.eGet(verticesFeature);
-		byte[] normals = (byte[])data.eGet(normalsFeature);
-		byte[] materials = (byte[])data.eGet(materialsFeature);
+
+		AbstractHashMapVirtualObject indicesBuffer = data.getDirectFeature(indicesFeature);
+		AbstractHashMapVirtualObject verticesBuffer = data.getDirectFeature(verticesFeature);
+		byte[] normals = null;
+		byte[] normalsQuantized = null;
+		if (quantizeNormals) {
+			AbstractHashMapVirtualObject normalsBuffer = data.getDirectFeature(normalsQuantizedFeature);
+			normalsQuantized = (byte[]) normalsBuffer.get("data");
+		} else {
+			AbstractHashMapVirtualObject normalsBuffer = data.getDirectFeature(normalsFeature);
+			normals = (byte[]) normalsBuffer.get("data");
+		}
+		AbstractHashMapVirtualObject colorsBuffer = data.getDirectFeature(colorsFeature);
 		HashMapWrappedVirtualObject color = (HashMapWrappedVirtualObject)data.eGet(colorFeature);
 		HashMapWrappedVirtualObject mostUsedColor = (HashMapWrappedVirtualObject)data.eGet(mostUsedColorFeature);
+		
+		byte[] indices = (byte[]) indicesBuffer.get("data");
+		byte[] vertices = (byte[]) verticesBuffer.get("data");
+		byte[] colors = null;
+		if (colorsBuffer != null) {
+			colors = (byte[]) colorsBuffer.get("data");			
+		}
 
 		int totalNrIndices = indices.length / 4;
 		int maxIndexValues = 16389;
@@ -506,9 +523,9 @@ public class BinaryGeometryMessagingStreamingSerializer implements MessagingStre
 				int nrParts = (totalNrIndices + maxIndexValues - 1) / maxIndexValues;
 				serializerDataOutputStream.writeInt(nrParts);
 
-				ByteBuffer indicesBuffer = ByteBuffer.wrap(indices);
-				indicesBuffer.order(ByteOrder.LITTLE_ENDIAN);
-				IntBuffer indicesIntBuffer = indicesBuffer.asIntBuffer();
+				ByteBuffer indicesByteBuffer = ByteBuffer.wrap(indices);
+				indicesByteBuffer.order(ByteOrder.LITTLE_ENDIAN);
+				IntBuffer indicesIntBuffer = indicesByteBuffer.asIntBuffer();
 
 				ByteBuffer vertexBuffer = ByteBuffer.wrap(vertices);
 				vertexBuffer.order(ByteOrder.LITTLE_ENDIAN);
@@ -580,8 +597,8 @@ public class BinaryGeometryMessagingStreamingSerializer implements MessagingStre
 						serializerDataOutputStream.writeFloatUnchecked(normalsFloatBuffer.get(oldIndex3 * 3 + 2));
 					}
 					// Only when materials are used we send them
-					if (materials != null && color == null) {
-						ByteBuffer materialsByteBuffer = ByteBuffer.wrap(materials);
+					if (colors != null && color == null) {
+						ByteBuffer materialsByteBuffer = ByteBuffer.wrap(colors);
 						materialsByteBuffer.order(ByteOrder.LITTLE_ENDIAN);
 						FloatBuffer materialsFloatBuffer = materialsByteBuffer.asFloatBuffer();
 
@@ -624,18 +641,18 @@ public class BinaryGeometryMessagingStreamingSerializer implements MessagingStre
 				serializerDataOutputStream.writeLong((boolean)data.eGet(hasTransparencyFeature) ? 1 : 0);
 				serializerDataOutputStream.writeLong(data.getOid());
 				
-				ByteBuffer indicesBuffer = ByteBuffer.wrap(indices);
-				indicesBuffer.order(ByteOrder.LITTLE_ENDIAN);
+				ByteBuffer indicesByteBuffer = ByteBuffer.wrap(indices);
+				indicesByteBuffer.order(ByteOrder.LITTLE_ENDIAN);
 				
-				serializerDataOutputStream.writeInt(indicesBuffer.capacity() / 4);
+				serializerDataOutputStream.writeInt(indicesByteBuffer.capacity() / 4);
 				if (useSmallInts) {
-					IntBuffer intBuffer = indicesBuffer.asIntBuffer();
+					IntBuffer intBuffer = indicesByteBuffer.asIntBuffer();
 					serializerDataOutputStream.ensureExtraCapacity(intBuffer.capacity() * 2);
 					for (int i=0; i<intBuffer.capacity(); i++) {
 						serializerDataOutputStream.writeShortUnchecked((short) intBuffer.get());
 					}
 				} else {
-					serializerDataOutputStream.write(indicesBuffer.array());
+					serializerDataOutputStream.write(indicesByteBuffer.array());
 				}
 				
 				// Added in version 11
@@ -660,8 +677,8 @@ public class BinaryGeometryMessagingStreamingSerializer implements MessagingStre
 				serializerDataOutputStream.write(normalsBuffer.array());
 				
 				// Only when materials are used we send them
-				if (materials != null && color == null) {
-					ByteBuffer materialsByteBuffer = ByteBuffer.wrap(materials);
+				if (colors != null && color == null) {
+					ByteBuffer materialsByteBuffer = ByteBuffer.wrap(colors);
 					
 					serializerDataOutputStream.writeInt(materialsByteBuffer.capacity() / 4);
 					serializerDataOutputStream.write(materialsByteBuffer.array());
@@ -697,9 +714,9 @@ public class BinaryGeometryMessagingStreamingSerializer implements MessagingStre
 					objectProvider.cache(data);
 				}
 				
-				ByteBuffer indicesBuffer = ByteBuffer.wrap(indices);
-				indicesBuffer.order(ByteOrder.LITTLE_ENDIAN);
-				IntBuffer indicesInt = indicesBuffer.asIntBuffer();
+				ByteBuffer indicesByteBuffer = ByteBuffer.wrap(indices);
+				indicesByteBuffer.order(ByteOrder.LITTLE_ENDIAN);
+				IntBuffer indicesInt = indicesByteBuffer.asIntBuffer();
 				
 				ByteBuffer vertexByteBuffer = ByteBuffer.wrap(vertices);
 				vertexByteBuffer.order(ByteOrder.LITTLE_ENDIAN);
@@ -709,7 +726,7 @@ public class BinaryGeometryMessagingStreamingSerializer implements MessagingStre
 				normalsByteBuffer.order(ByteOrder.LITTLE_ENDIAN);
 				FloatBuffer normalBuffer = normalsByteBuffer.asFloatBuffer();
 				
-				ByteBuffer materialsByteBuffer = ByteBuffer.wrap(materials);
+				ByteBuffer materialsByteBuffer = ByteBuffer.wrap(colors);
 				materialsByteBuffer.order(ByteOrder.LITTLE_ENDIAN);
 				FloatBuffer materialsFloatBuffer = materialsByteBuffer.asFloatBuffer();
 				
@@ -727,7 +744,7 @@ public class BinaryGeometryMessagingStreamingSerializer implements MessagingStre
 					// Assuming all 3 vertices have the same normal and that it stays the same...
 					float[] normal = new float[]{normalBuffer.get(index1 * 3), normalBuffer.get(index1 * 3 + 1), normalBuffer.get(index1 * 3 + 2)};
 					float[] triangleColor = null;
-					if (!useSingleColors && materials != null && color == null) {
+					if (!useSingleColors && colors != null && color == null) {
 						triangleColor = new float[]{materialsFloatBuffer.get(index1 * 3), materialsFloatBuffer.get(index1 * 3 + 1), materialsFloatBuffer.get(index1 * 3 + 2), materialsFloatBuffer.get(index1 * 3 + 3)};
 					}
 					
@@ -781,7 +798,7 @@ public class BinaryGeometryMessagingStreamingSerializer implements MessagingStre
 						newVertices.add(v3[1]);
 						newVertices.add(v3[2]);
 						
-						if (!useSingleColors && materials != null && color == null) {
+						if (!useSingleColors && colors != null && color == null) {
 							newColors.add(triangleColor[0]);
 							newColors.add(triangleColor[1]);
 							newColors.add(triangleColor[2]);
@@ -893,7 +910,7 @@ public class BinaryGeometryMessagingStreamingSerializer implements MessagingStre
 				}
 
 				// Only when materials are used we send them
-				if (!useSingleColors && materials != null && color == null) {
+				if (!useSingleColors && colors != null && color == null) {
 					serializerDataOutputStream.writeInt(newColors.size());
 					for (int i=0; i<newColors.size(); i++) {
 						serializerDataOutputStream.writeFloat(newColors.get(i));
@@ -903,17 +920,17 @@ public class BinaryGeometryMessagingStreamingSerializer implements MessagingStre
 					serializerDataOutputStream.writeInt(0);
 				}					
 			} else {
-				ByteBuffer indicesBuffer = ByteBuffer.wrap(indices);
-				indicesBuffer.order(ByteOrder.LITTLE_ENDIAN);
-				serializerDataOutputStream.writeInt(indicesBuffer.capacity() / 4);
+				ByteBuffer indicesByteBuffer = ByteBuffer.wrap(indices);
+				indicesByteBuffer.order(ByteOrder.LITTLE_ENDIAN);
+				serializerDataOutputStream.writeInt(indicesByteBuffer.capacity() / 4);
 				if (useSmallInts) {
-					IntBuffer intBuffer = indicesBuffer.asIntBuffer();
+					IntBuffer intBuffer = indicesByteBuffer.asIntBuffer();
 					serializerDataOutputStream.ensureExtraCapacity(intBuffer.capacity() * 2);
 					for (int i=0; i<intBuffer.capacity(); i++) {
 						serializerDataOutputStream.writeShortUnchecked((short) intBuffer.get());
 					}
 				} else {
-					serializerDataOutputStream.write(indicesBuffer.array());
+					serializerDataOutputStream.write(indicesByteBuffer.array());
 				}
 				// Added in version 11
 				if (color != null) {
@@ -995,23 +1012,19 @@ public class BinaryGeometryMessagingStreamingSerializer implements MessagingStre
 					}
 				}
 				
-				ByteBuffer normalsBuffer = ByteBuffer.wrap(normals);
-				serializerDataOutputStream.writeInt(normalsBuffer.capacity() / 4);
 				if (quantizeNormals) {
-					normalsBuffer.order(ByteOrder.LITTLE_ENDIAN);
-					for (int i=0; i<normalsBuffer.capacity() / 4; i++) {
-						float normal = normalsBuffer.getFloat();
-						serializerDataOutputStream.writeByteUnchecked((int) (normal * 127));
-					}
+					serializerDataOutputStream.writeInt(normalsQuantized.length);
+					serializerDataOutputStream.write(normalsQuantized);
 					serializerDataOutputStream.align8();
 				} else {
-					serializerDataOutputStream.write(normalsBuffer.array());
+					serializerDataOutputStream.writeInt(normals.length / 4);
+					serializerDataOutputStream.write(normals);
 				}
 				
 				if (useSingleColors) {
 					serializerDataOutputStream.writeInt(0);
 				} else {
-					if (materials == null) {
+					if (colors == null) {
 						// We need to generate them
 						if (color == null) {
 							serializerDataOutputStream.writeInt(0);
@@ -1036,7 +1049,7 @@ public class BinaryGeometryMessagingStreamingSerializer implements MessagingStre
 							}
 						}
 					} else {
-						ByteBuffer materialsByteBuffer = ByteBuffer.wrap(materials);
+						ByteBuffer materialsByteBuffer = ByteBuffer.wrap(colors);
 						serializerDataOutputStream.writeInt(materialsByteBuffer.capacity());
 						if (quantizeColors) {
 							serializerDataOutputStream.write(materialsByteBuffer.array());
