@@ -276,6 +276,7 @@ public class BinaryGeometryMessagingStreamingSerializer implements MessagingStre
 		}
 		case START:
 			writeStart();
+			serializerDataOutputStream.align8();
 			if (next == null) {
 				mode = Mode.END;
 			} else {
@@ -284,12 +285,15 @@ public class BinaryGeometryMessagingStreamingSerializer implements MessagingStre
 			break;
 		case DATA:
 			if (!writeData()) {
+				serializerDataOutputStream.align8();
 				mode = Mode.END;
 				return true;
 			}
+			serializerDataOutputStream.align8();
 			break;
 		case END:
 			writeEnd();
+			serializerDataOutputStream.align8();
 			return false;
 		default:
 			break;
