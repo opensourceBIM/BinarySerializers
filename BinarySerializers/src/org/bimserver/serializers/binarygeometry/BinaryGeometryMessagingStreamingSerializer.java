@@ -179,12 +179,12 @@ public class BinaryGeometryMessagingStreamingSerializer implements MessagingStre
 			if (query.has("inBoundingBox")) {
 				inBoundingBox = query.get("inBoundingBox");
 				bounds = new double[6];
-				bounds[0] = inBoundingBox.get("x").asDouble();
-				bounds[1] = inBoundingBox.get("y").asDouble();
-				bounds[2] = inBoundingBox.get("z").asDouble();
-				bounds[3] = inBoundingBox.get("width").asDouble();
-				bounds[4] = inBoundingBox.get("height").asDouble();
-				bounds[5] = inBoundingBox.get("depth").asDouble();
+//				bounds[0] = inBoundingBox.get("x").asDouble();
+//				bounds[1] = inBoundingBox.get("y").asDouble();
+//				bounds[2] = inBoundingBox.get("z").asDouble();
+//				bounds[3] = inBoundingBox.get("width").asDouble();
+//				bounds[4] = inBoundingBox.get("height").asDouble();
+//				bounds[5] = inBoundingBox.get("depth").asDouble();
 				
 				if (inBoundingBox.has("excludeOctants")) {
 					this.excludeOctants = true;
