@@ -242,17 +242,19 @@ public class BinaryGeometryMessagingStreamingSerializer implements MessagingStre
 			}
 			if (quantizeVertices) {
 				ObjectNode vqmNode = (ObjectNode) geometrySettings.get("vertexQuantizationMatrices");
-				Iterator<String> fieldNames = vqmNode.fieldNames();
-				vertexQuantizationMatrices = new HashMap<>();
-				while (fieldNames.hasNext()) {
-					String key = fieldNames.next();
-					long roid = Long.parseLong(key);
-					float[] vertexQuantizationMatrix = new float[16];
-					ArrayNode mNode = (ArrayNode) vqmNode.get(key);
-					vertexQuantizationMatrices.put(roid, vertexQuantizationMatrix);
-					int i=0;
-					for (JsonNode v : mNode) {
-						vertexQuantizationMatrix[i++] = v.floatValue();
+				if (vqmNode != null) {
+					Iterator<String> fieldNames = vqmNode.fieldNames();
+					vertexQuantizationMatrices = new HashMap<>();
+					while (fieldNames.hasNext()) {
+						String key = fieldNames.next();
+						long croid = Long.parseLong(key);
+						float[] vertexQuantizationMatrix = new float[16];
+						ArrayNode mNode = (ArrayNode) vqmNode.get(key);
+						vertexQuantizationMatrices.put(croid, vertexQuantizationMatrix);
+						int i=0;
+						for (JsonNode v : mNode) {
+							vertexQuantizationMatrix[i++] = v.floatValue();
+						}
 					}
 				}
 			}
@@ -710,7 +712,9 @@ public class BinaryGeometryMessagingStreamingSerializer implements MessagingStre
 			serializerDataOutputStream.writeUTF(type);
 			serializerDataOutputStream.align8();
 			long roid = data.getRoid();
+			long croid = data.getCroid();
 			serializerDataOutputStream.writeLong(roid);
+			serializerDataOutputStream.writeLong(croid);
 
 			serializerDataOutputStream.writeLong((boolean)data.eGet(hasTransparencyFeature) ? 1 : 0);
 			serializerDataOutputStream.writeLong(oid);
@@ -990,9 +994,9 @@ public class BinaryGeometryMessagingStreamingSerializer implements MessagingStre
 								vertex[2] = vertex[2] * projectInfo.getMultiplierToMm();
 							}
 							
-							float[] matrix = vertexQuantizationMatrices.get(roid);
+							float[] matrix = vertexQuantizationMatrices.get(croid);
 							if (matrix == null) {
-								LOGGER.error("Missing quant matrix for " + roid);
+								LOGGER.error("Missing quant matrix for " + croid);
 								return;
 							}
 							Matrix.multiplyMV(result, 0, matrix, 0, vertex, 0);
