@@ -83,9 +83,11 @@ public class BinaryGeometryMessagingStreamingSerializer implements MessagingStre
 	 *  - Added ifcproduct oid to simplify client-side operations, also added type of object, also added type for GeometryData
 	 *  Version 15:
 	 *  - Also sending a multiplier to convert to mm
+	 *  Version 16:
+	 *  - Just a version bump to make sure older client will err-out
 	 */
 	
-	private static final byte FORMAT_VERSION = 15;
+	private static final byte FORMAT_VERSION = 16;
 	
 	private enum Mode {
 		LOAD,
@@ -120,7 +122,7 @@ public class BinaryGeometryMessagingStreamingSerializer implements MessagingStre
 	private boolean normalizeUnitsToMM = false;
 	private boolean useSmallInts = true;
 	private boolean splitTriangles = false;
-	private boolean reportProgress;
+	private boolean reportProgress = true;
 	private Map<Long, float[]> vertexQuantizationMatrices;
 	
 	private Mode mode = Mode.LOAD;
@@ -946,6 +948,7 @@ public class BinaryGeometryMessagingStreamingSerializer implements MessagingStre
 					for (int i=0; i<intBuffer.capacity(); i++) {
 						serializerDataOutputStream.writeShortUnchecked((short) intBuffer.get());
 					}
+					serializerDataOutputStream.align4();
 				} else {
 					serializerDataOutputStream.write(indicesByteBuffer.array());
 				}
