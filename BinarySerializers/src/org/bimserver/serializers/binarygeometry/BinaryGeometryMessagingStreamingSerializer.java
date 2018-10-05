@@ -525,153 +525,48 @@ public class BinaryGeometryMessagingStreamingSerializer implements MessagingStre
 		int totalNrIndices = indices.length / 4;
 		int maxIndexValues = 16389;
 
-		if (splitGeometry) {
-			if (totalNrIndices > maxIndexValues) {
-				serializerDataOutputStream.writeByte(MessageType.GEOMETRY_TRIANGLES_PARTED.getId());
-				serializerDataOutputStream.writeInt((int) data.get("reused"));
-				serializerDataOutputStream.align8();
-				serializerDataOutputStream.writeLong((boolean)data.eGet(hasTransparencyFeature) ? 1 : 0);
-				serializerDataOutputStream.writeLong(data.getOid());
-				
-				// Split geometry, this algorithm - for now - just throws away all the reuse of vertices that might be there
-				// Also, although usually the vertices buffers are too large, this algorithm is based on the indices, so we
-				// probably are not cramming as much data as we can in each "part", but that's not really a problem I think
+		if (splitGeometry && totalNrIndices > maxIndexValues) {
+			serializerDataOutputStream.writeByte(MessageType.GEOMETRY_TRIANGLES_PARTED.getId());
+			serializerDataOutputStream.writeInt((int) data.get("reused"));
+			short cid = (short) data.get("type");
+			String type = objectProvider.getEClassForCid(cid).getName();
+			serializerDataOutputStream.writeUTF(type);
+			serializerDataOutputStream.align8();
+			serializerDataOutputStream.writeLong((boolean)data.eGet(hasTransparencyFeature) ? 1 : 0);
+			serializerDataOutputStream.writeLong(data.getOid());
+			
+			// Split geometry, this algorithm - for now - just throws away all the reuse of vertices that might be there
+			// Also, although usually the vertices buffers are too large, this algorithm is based on the indices, so we
+			// probably are not cramming as much data as we can in each "part", but that's not really a problem I think
 
-				int nrParts = (totalNrIndices + maxIndexValues - 1) / maxIndexValues;
-				serializerDataOutputStream.writeInt(nrParts);
+			int nrParts = (totalNrIndices + maxIndexValues - 1) / maxIndexValues;
+			serializerDataOutputStream.writeInt(nrParts);
 
-				ByteBuffer indicesByteBuffer = ByteBuffer.wrap(indices);
-				indicesByteBuffer.order(ByteOrder.LITTLE_ENDIAN);
-				IntBuffer indicesIntBuffer = indicesByteBuffer.asIntBuffer();
+			ByteBuffer indicesByteBuffer = ByteBuffer.wrap(indices);
+			indicesByteBuffer.order(ByteOrder.LITTLE_ENDIAN);
+			IntBuffer indicesIntBuffer = indicesByteBuffer.asIntBuffer();
 
-				ByteBuffer vertexBuffer = ByteBuffer.wrap(vertices);
-				vertexBuffer.order(ByteOrder.LITTLE_ENDIAN);
-				FloatBuffer verticesFloatBuffer = vertexBuffer.asFloatBuffer();
-				
-				ByteBuffer normalsBuffer = ByteBuffer.wrap(normals);
-				normalsBuffer.order(ByteOrder.LITTLE_ENDIAN);
-				FloatBuffer normalsFloatBuffer = normalsBuffer.asFloatBuffer();
+			ByteBuffer vertexBuffer = ByteBuffer.wrap(vertices);
+			vertexBuffer.order(ByteOrder.LITTLE_ENDIAN);
+			FloatBuffer verticesFloatBuffer = vertexBuffer.asFloatBuffer();
+			
+			ByteBuffer normalsBuffer = ByteBuffer.wrap(normals);
+			normalsBuffer.order(ByteOrder.LITTLE_ENDIAN);
+			FloatBuffer normalsFloatBuffer = normalsBuffer.asFloatBuffer();
 
-				for (int part=0; part<nrParts; part++) {
-					long splitId = splitCounter++;
-					serializerDataOutputStream.writeLong(splitId);
-					
-					short indexCounter = 0;
-					int upto = Math.min((part + 1) * maxIndexValues, totalNrIndices);
-					serializerDataOutputStream.writeInt(upto - part * maxIndexValues);
-					serializerDataOutputStream.ensureExtraCapacity(2 * (upto - part * maxIndexValues));
-					for (int i=part * maxIndexValues; i<upto; i++) {
-						serializerDataOutputStream.writeShortUnchecked(indexCounter++);
-					}
-					
-					// Added in version 11
-					if (color != null) {
-						serializerDataOutputStream.writeInt(1);
-						serializerDataOutputStream.writeFloat((float)color.eGet("x"));
-						serializerDataOutputStream.writeFloat((float)color.eGet("y"));
-						serializerDataOutputStream.writeFloat((float)color.eGet("z"));
-						serializerDataOutputStream.writeFloat((float)color.eGet("w"));
-					} else {
-						serializerDataOutputStream.writeInt(0);
-					}
-					
-					serializerDataOutputStream.align4();
-					
-					int nrVertices = (upto - part * maxIndexValues) * 3;
-					serializerDataOutputStream.writeInt(nrVertices);
-					serializerDataOutputStream.ensureExtraCapacity(12 * (upto - part * maxIndexValues));
-					
-					for (int i=part * maxIndexValues; i<upto; i+=3) {
-						int oldIndex1 = indicesIntBuffer.get(i);
-						int oldIndex2 = indicesIntBuffer.get(i+1);
-						int oldIndex3 = indicesIntBuffer.get(i+2);
-						
-						serializerDataOutputStream.writeFloatUnchecked(verticesFloatBuffer.get(oldIndex1 * 3));
-						serializerDataOutputStream.writeFloatUnchecked(verticesFloatBuffer.get(oldIndex1 * 3 + 1));
-						serializerDataOutputStream.writeFloatUnchecked(verticesFloatBuffer.get(oldIndex1 * 3 + 2));
-						serializerDataOutputStream.writeFloatUnchecked(verticesFloatBuffer.get(oldIndex2 * 3));
-						serializerDataOutputStream.writeFloatUnchecked(verticesFloatBuffer.get(oldIndex2 * 3 + 1));
-						serializerDataOutputStream.writeFloatUnchecked(verticesFloatBuffer.get(oldIndex2 * 3 + 2));
-						serializerDataOutputStream.writeFloatUnchecked(verticesFloatBuffer.get(oldIndex3 * 3));
-						serializerDataOutputStream.writeFloatUnchecked(verticesFloatBuffer.get(oldIndex3 * 3 + 1));
-						serializerDataOutputStream.writeFloatUnchecked(verticesFloatBuffer.get(oldIndex3 * 3 + 2));
-					}
-					serializerDataOutputStream.writeInt(nrVertices);
-					serializerDataOutputStream.ensureExtraCapacity(12 * (upto - part * maxIndexValues));
-					for (int i=part * maxIndexValues; i<upto; i+=3) {
-						int oldIndex1 = indicesIntBuffer.get(i);
-						int oldIndex2 = indicesIntBuffer.get(i+1);
-						int oldIndex3 = indicesIntBuffer.get(i+2);
-						
-						serializerDataOutputStream.writeFloatUnchecked(normalsFloatBuffer.get(oldIndex1 * 3));
-						serializerDataOutputStream.writeFloatUnchecked(normalsFloatBuffer.get(oldIndex1 * 3 + 1));
-						serializerDataOutputStream.writeFloatUnchecked(normalsFloatBuffer.get(oldIndex1 * 3 + 2));
-						serializerDataOutputStream.writeFloatUnchecked(normalsFloatBuffer.get(oldIndex2 * 3));
-						serializerDataOutputStream.writeFloatUnchecked(normalsFloatBuffer.get(oldIndex2 * 3 + 1));
-						serializerDataOutputStream.writeFloatUnchecked(normalsFloatBuffer.get(oldIndex2 * 3 + 2));
-						serializerDataOutputStream.writeFloatUnchecked(normalsFloatBuffer.get(oldIndex3 * 3));
-						serializerDataOutputStream.writeFloatUnchecked(normalsFloatBuffer.get(oldIndex3 * 3 + 1));
-						serializerDataOutputStream.writeFloatUnchecked(normalsFloatBuffer.get(oldIndex3 * 3 + 2));
-					}
-					// Only when materials are used we send them
-					if (colors != null && color == null) {
-						ByteBuffer materialsByteBuffer = ByteBuffer.wrap(colors);
-						materialsByteBuffer.order(ByteOrder.LITTLE_ENDIAN);
-						FloatBuffer materialsFloatBuffer = materialsByteBuffer.asFloatBuffer();
-
-						serializerDataOutputStream.writeInt(nrVertices * 4 / 3);
-						serializerDataOutputStream.ensureExtraCapacity(16 * (upto - part * maxIndexValues));
-						for (int i=part * maxIndexValues; i<upto; i+=3) {
-							int oldIndex1 = indicesIntBuffer.get(i);
-							int oldIndex2 = indicesIntBuffer.get(i+1);
-							int oldIndex3 = indicesIntBuffer.get(i+2);
-
-							serializerDataOutputStream.writeFloatUnchecked(materialsFloatBuffer.get(oldIndex1 * 4));
-							serializerDataOutputStream.writeFloatUnchecked(materialsFloatBuffer.get(oldIndex1 * 4 + 1));
-							serializerDataOutputStream.writeFloatUnchecked(materialsFloatBuffer.get(oldIndex1 * 4 + 2));
-							serializerDataOutputStream.writeFloatUnchecked(materialsFloatBuffer.get(oldIndex1 * 4 + 3));
-							serializerDataOutputStream.writeFloatUnchecked(materialsFloatBuffer.get(oldIndex2 * 4));
-							serializerDataOutputStream.writeFloatUnchecked(materialsFloatBuffer.get(oldIndex2 * 4 + 1));
-							serializerDataOutputStream.writeFloatUnchecked(materialsFloatBuffer.get(oldIndex2 * 4 + 2));
-							serializerDataOutputStream.writeFloatUnchecked(materialsFloatBuffer.get(oldIndex2 * 4 + 3));
-							serializerDataOutputStream.writeFloatUnchecked(materialsFloatBuffer.get(oldIndex3 * 4));
-							serializerDataOutputStream.writeFloatUnchecked(materialsFloatBuffer.get(oldIndex3 * 4 + 1));
-							serializerDataOutputStream.writeFloatUnchecked(materialsFloatBuffer.get(oldIndex3 * 4 + 2));
-							serializerDataOutputStream.writeFloatUnchecked(materialsFloatBuffer.get(oldIndex3 * 4 + 3));
-						}
-					} else {
-						// No materials used
-						serializerDataOutputStream.writeInt(0);
-					}
-				}
-			} else {
-				serializerDataOutputStream.writeByte(MessageType.GEOMETRY_TRIANGLES.getId());
-				serializerDataOutputStream.writeInt((int) data.get("reused"));
+			for (int part=0; part<nrParts; part++) {
+				long splitId = splitCounter++;
+				serializerDataOutputStream.writeLong(splitId);
 				
-				short cid = (short) data.get("type");
-				String type = objectProvider.getEClassForCid(cid).getName();
-				serializerDataOutputStream.writeUTF(type);
-				serializerDataOutputStream.align8();
-				
-				long roid = data.getRoid();
-				serializerDataOutputStream.writeLong(roid);
-				serializerDataOutputStream.writeLong((boolean)data.eGet(hasTransparencyFeature) ? 1 : 0);
-				serializerDataOutputStream.writeLong(data.getOid());
-				
-				ByteBuffer indicesByteBuffer = ByteBuffer.wrap(indices);
-				indicesByteBuffer.order(ByteOrder.LITTLE_ENDIAN);
-				
-				serializerDataOutputStream.writeInt(indicesByteBuffer.capacity() / 4);
-				if (useSmallInts) {
-					IntBuffer intBuffer = indicesByteBuffer.asIntBuffer();
-					serializerDataOutputStream.ensureExtraCapacity(intBuffer.capacity() * 2);
-					for (int i=0; i<intBuffer.capacity(); i++) {
-						serializerDataOutputStream.writeShortUnchecked((short) intBuffer.get());
-					}
-				} else {
-					serializerDataOutputStream.write(indicesByteBuffer.array());
+				short indexCounter = 0;
+				int upto = Math.min((part + 1) * maxIndexValues, totalNrIndices);
+				serializerDataOutputStream.writeInt(upto - part * maxIndexValues);
+				serializerDataOutputStream.ensureExtraCapacity(2 * (upto - part * maxIndexValues));
+				for (int i=part * maxIndexValues; i<upto; i++) {
+					serializerDataOutputStream.writeShortUnchecked(indexCounter++);
 				}
 				
+				serializerDataOutputStream.align4();
 				// Added in version 11
 				if (color != null) {
 					serializerDataOutputStream.writeInt(1);
@@ -684,21 +579,67 @@ public class BinaryGeometryMessagingStreamingSerializer implements MessagingStre
 				}
 				
 				serializerDataOutputStream.align4();
-
-				ByteBuffer vertexByteBuffer = ByteBuffer.wrap(vertices);
-				serializerDataOutputStream.writeInt(vertexByteBuffer.capacity() / 4);
-				serializerDataOutputStream.write(vertexByteBuffer.array());
 				
-				ByteBuffer normalsBuffer = ByteBuffer.wrap(normals);
-				serializerDataOutputStream.writeInt(normalsBuffer.capacity() / 4);
-				serializerDataOutputStream.write(normalsBuffer.array());
+				int nrVertices = (upto - part * maxIndexValues) * 3;
+				serializerDataOutputStream.writeInt(nrVertices);
+				serializerDataOutputStream.ensureExtraCapacity(12 * (upto - part * maxIndexValues));
 				
+				for (int i=part * maxIndexValues; i<upto; i+=3) {
+					int oldIndex1 = indicesIntBuffer.get(i);
+					int oldIndex2 = indicesIntBuffer.get(i+1);
+					int oldIndex3 = indicesIntBuffer.get(i+2);
+					
+					serializerDataOutputStream.writeFloatUnchecked(verticesFloatBuffer.get(oldIndex1 * 3));
+					serializerDataOutputStream.writeFloatUnchecked(verticesFloatBuffer.get(oldIndex1 * 3 + 1));
+					serializerDataOutputStream.writeFloatUnchecked(verticesFloatBuffer.get(oldIndex1 * 3 + 2));
+					serializerDataOutputStream.writeFloatUnchecked(verticesFloatBuffer.get(oldIndex2 * 3));
+					serializerDataOutputStream.writeFloatUnchecked(verticesFloatBuffer.get(oldIndex2 * 3 + 1));
+					serializerDataOutputStream.writeFloatUnchecked(verticesFloatBuffer.get(oldIndex2 * 3 + 2));
+					serializerDataOutputStream.writeFloatUnchecked(verticesFloatBuffer.get(oldIndex3 * 3));
+					serializerDataOutputStream.writeFloatUnchecked(verticesFloatBuffer.get(oldIndex3 * 3 + 1));
+					serializerDataOutputStream.writeFloatUnchecked(verticesFloatBuffer.get(oldIndex3 * 3 + 2));
+				}
+				serializerDataOutputStream.writeInt(nrVertices);
+				serializerDataOutputStream.ensureExtraCapacity(12 * (upto - part * maxIndexValues));
+				for (int i=part * maxIndexValues; i<upto; i+=3) {
+					int oldIndex1 = indicesIntBuffer.get(i);
+					int oldIndex2 = indicesIntBuffer.get(i+1);
+					int oldIndex3 = indicesIntBuffer.get(i+2);
+					
+					serializerDataOutputStream.writeFloatUnchecked(normalsFloatBuffer.get(oldIndex1 * 3));
+					serializerDataOutputStream.writeFloatUnchecked(normalsFloatBuffer.get(oldIndex1 * 3 + 1));
+					serializerDataOutputStream.writeFloatUnchecked(normalsFloatBuffer.get(oldIndex1 * 3 + 2));
+					serializerDataOutputStream.writeFloatUnchecked(normalsFloatBuffer.get(oldIndex2 * 3));
+					serializerDataOutputStream.writeFloatUnchecked(normalsFloatBuffer.get(oldIndex2 * 3 + 1));
+					serializerDataOutputStream.writeFloatUnchecked(normalsFloatBuffer.get(oldIndex2 * 3 + 2));
+					serializerDataOutputStream.writeFloatUnchecked(normalsFloatBuffer.get(oldIndex3 * 3));
+					serializerDataOutputStream.writeFloatUnchecked(normalsFloatBuffer.get(oldIndex3 * 3 + 1));
+					serializerDataOutputStream.writeFloatUnchecked(normalsFloatBuffer.get(oldIndex3 * 3 + 2));
+				}
 				// Only when materials are used we send them
 				if (colors != null && color == null) {
 					ByteBuffer materialsByteBuffer = ByteBuffer.wrap(colors);
 					
-					serializerDataOutputStream.writeInt(materialsByteBuffer.capacity() / 4);
-					serializerDataOutputStream.write(materialsByteBuffer.array());
+					serializerDataOutputStream.writeInt(nrVertices * 4 / 3);
+					serializerDataOutputStream.ensureExtraCapacity(16 * (upto - part * maxIndexValues));
+					for (int i=part * maxIndexValues; i<upto; i+=3) {
+						int oldIndex1 = indicesIntBuffer.get(i);
+						int oldIndex2 = indicesIntBuffer.get(i+1);
+						int oldIndex3 = indicesIntBuffer.get(i+2);
+						
+						serializerDataOutputStream.writeFloatUnchecked(UnsignedBytes.toInt(materialsByteBuffer.get(oldIndex1 * 4)) / 255f);
+						serializerDataOutputStream.writeFloatUnchecked(UnsignedBytes.toInt(materialsByteBuffer.get(oldIndex1 * 4 + 1)) / 255f);
+						serializerDataOutputStream.writeFloatUnchecked(UnsignedBytes.toInt(materialsByteBuffer.get(oldIndex1 * 4 + 2)) / 255f);
+						serializerDataOutputStream.writeFloatUnchecked(UnsignedBytes.toInt(materialsByteBuffer.get(oldIndex1 * 4 + 3)) / 255f);
+						serializerDataOutputStream.writeFloatUnchecked(UnsignedBytes.toInt(materialsByteBuffer.get(oldIndex2 * 4)) / 255f);
+						serializerDataOutputStream.writeFloatUnchecked(UnsignedBytes.toInt(materialsByteBuffer.get(oldIndex2 * 4 + 1)) / 255f);
+						serializerDataOutputStream.writeFloatUnchecked(UnsignedBytes.toInt(materialsByteBuffer.get(oldIndex2 * 4 + 2)) / 255f);
+						serializerDataOutputStream.writeFloatUnchecked(UnsignedBytes.toInt(materialsByteBuffer.get(oldIndex2 * 4 + 3)) / 255f);
+						serializerDataOutputStream.writeFloatUnchecked(UnsignedBytes.toInt(materialsByteBuffer.get(oldIndex3 * 4)) / 255f);
+						serializerDataOutputStream.writeFloatUnchecked(UnsignedBytes.toInt(materialsByteBuffer.get(oldIndex3 * 4 + 1)) / 255f);
+						serializerDataOutputStream.writeFloatUnchecked(UnsignedBytes.toInt(materialsByteBuffer.get(oldIndex3 * 4 + 2)) / 255f);
+						serializerDataOutputStream.writeFloatUnchecked(UnsignedBytes.toInt(materialsByteBuffer.get(oldIndex3 * 4 + 3)) / 255f);
+					}
 				} else {
 					// No materials used
 					serializerDataOutputStream.writeInt(0);
