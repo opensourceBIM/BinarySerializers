@@ -24,16 +24,18 @@ import java.nio.ByteOrder;
 import java.nio.DoubleBuffer;
 import java.nio.FloatBuffer;
 import java.nio.IntBuffer;
-import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.Iterator;
-import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import org.bimserver.BimserverDatabaseException;
 import org.bimserver.database.queries.om.QueryException;
 import org.bimserver.emf.PackageMetaData;
 import org.bimserver.geometry.Matrix;
+import org.bimserver.geometry.Matrix3;
+import org.bimserver.geometry.Vector3;
 import org.bimserver.interfaces.objects.SVector3f;
 import org.bimserver.models.geometry.GeometryPackage;
 import org.bimserver.plugins.LittleEndianSerializerDataOutputStream;
@@ -44,12 +46,11 @@ import org.bimserver.plugins.serializers.ObjectProvider;
 import org.bimserver.plugins.serializers.ProgressReporter;
 import org.bimserver.plugins.serializers.ProjectInfo;
 import org.bimserver.plugins.serializers.SerializerException;
-import org.bimserver.serializers.binarygeometry.clipping.Edge;
 import org.bimserver.serializers.binarygeometry.clipping.Point;
-import org.bimserver.serializers.binarygeometry.clipping.PolygonClipping;
 import org.bimserver.shared.AbstractHashMapVirtualObject;
 import org.bimserver.shared.HashMapVirtualObject;
 import org.bimserver.shared.HashMapWrappedVirtualObject;
+import org.eclipse.emf.ecore.EClass;
 import org.eclipse.emf.ecore.EStructuralFeature;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -85,14 +86,19 @@ public class BinaryGeometryMessagingStreamingSerializer implements MessagingStre
 	 *  - Also sending a multiplier to convert to mm
 	 *  Version 16:
 	 *  - Just a version bump to make sure older client will err-out
+	 *  Version 17:
+	 *  - Sending the amount of colors now for GeometryInfo and also sending 1 byte to indicate whether geometry is in a completeBuffer
+	 *  - Added writePreparedBuffer (should not have an impact if you don't send the prepareBuffers option)
 	 */
 	
-	private static final byte FORMAT_VERSION = 16;
+	private static final byte FORMAT_VERSION = 17;
 	
 	private enum Mode {
 		LOAD,
 		START,
 		DATA,
+		PREPARED_BUFFER_TRANSPARENT,
+		PREPARED_BUFFER_OPAQUE,
 		END
 	}
 	
@@ -101,6 +107,8 @@ public class BinaryGeometryMessagingStreamingSerializer implements MessagingStre
 		GEOMETRY_TRIANGLES_PARTED((byte)3),
 		GEOMETRY_TRIANGLES((byte)1),
 		GEOMETRY_INFO((byte)5),
+		PREPARED_BUFFER_TRANSPARENT((byte)7),
+		PREPARED_BUFFER_OPAQUE((byte)8),
 		END((byte)6);
 		
 		private byte id;
@@ -119,11 +127,18 @@ public class BinaryGeometryMessagingStreamingSerializer implements MessagingStre
 	private boolean quantizeNormals = false;
 	private boolean quantizeVertices = false;
 	private boolean quantizeColors = false;
+	private boolean prepareBuffers = false;
 	private boolean normalizeUnitsToMM = false;
 	private boolean useSmallInts = true;
-	private boolean splitTriangles = false;
 	private boolean reportProgress = true;
 	private Map<Long, float[]> vertexQuantizationMatrices;
+	
+	private GeometryBuffer transparentGeometryBuffer;
+	private GeometryBuffer opaqueGeometryBuffer;
+	
+	private final Map<Long, HashMapVirtualObject> oidToGeometryData = new HashMap<>();
+	private final Map<Long, HashMapVirtualObject> dataToGeometryInfo = new HashMap<>();
+	private float[] vertexQuantizationMatrix;
 	
 	private Mode mode = Mode.LOAD;
 	private long splitCounter = 0;
@@ -135,35 +150,25 @@ public class BinaryGeometryMessagingStreamingSerializer implements MessagingStre
 	private int nrObjectsWritten;
 	private int size;
 
-	private double[] bounds;
-
-	private ArrayList<Edge> clippingPlane;
-
-	private PolygonClipping polygonClipping;
-
 	private ByteBuffer lastTransformation;
 
-	private DoubleBuffer asDoubleBuffer;
-
-	private double[] ms;
-
-	private double[] inverse = new double[16];
-
-	private Map<Long, Integer> dataOidsWritten = new HashMap<>();
-
-	private JsonNode inBoundingBox;
-
-	private boolean excludeOctants;
-
-
-//	private Bounds modelBounds;
-//	private Bounds modelBoundsUntranslated;
+	private Set<Long> reusedDataOids;
 
 	@Override
 	public void init(ObjectProvider objectProvider, ProjectInfo projectInfo, PluginManagerInterface pluginManager, PackageMetaData packageMetaData) throws SerializerException {
 		this.objectProvider = objectProvider;
 		this.projectInfo = projectInfo;
 		ObjectNode queryNode = objectProvider.getQueryNode();
+		if (queryNode.has("tiles")) {
+			ObjectNode tilesNode = (ObjectNode)queryNode.get("tiles");
+			if (tilesNode.has("geometryDataToReuse")) {
+				ArrayNode reuseNodes = (ArrayNode)tilesNode.get("geometryDataToReuse");
+				this.reusedDataOids = new HashSet<>();
+				for (JsonNode jsonNode : reuseNodes) {
+					this.reusedDataOids.add(jsonNode.asLong());
+				}
+			}
+		}
 		if (queryNode.has("loaderSettings")) {
 			ObjectNode geometrySettings = (ObjectNode) queryNode.get("loaderSettings");
 			
@@ -175,74 +180,24 @@ public class BinaryGeometryMessagingStreamingSerializer implements MessagingStre
 			normalizeUnitsToMM = geometrySettings.has("normalizeUnitsToMM") && geometrySettings.get("normalizeUnitsToMM").asBoolean();
 			reportProgress = !geometrySettings.has("reportProgress") || geometrySettings.get("reportProgress").asBoolean(); // default is true for backwards compat
 			useSmallInts = !geometrySettings.has("useSmallInts") || geometrySettings.get("useSmallInts").asBoolean(); // default is true for backwards compat
-			splitTriangles = geometrySettings.has("splitTriangles") && geometrySettings.get("splitTriangles").asBoolean();
-			ArrayNode queries = (ArrayNode) objectProvider.getQueryNode().get("queries");
-			ObjectNode query = (ObjectNode) queries.get(0);
-			if (query.has("inBoundingBox")) {
-				inBoundingBox = query.get("inBoundingBox");
-				bounds = new double[6];
-//				bounds[0] = inBoundingBox.get("x").asDouble();
-//				bounds[1] = inBoundingBox.get("y").asDouble();
-//				bounds[2] = inBoundingBox.get("z").asDouble();
-//				bounds[3] = inBoundingBox.get("width").asDouble();
-//				bounds[4] = inBoundingBox.get("height").asDouble();
-//				bounds[5] = inBoundingBox.get("depth").asDouble();
-				
-				if (inBoundingBox.has("excludeOctants")) {
-					this.excludeOctants = true;
-				}
-			}
-			if (splitTriangles) {
-				
-				clippingPlane = new ArrayList<>();
-				Point a = new Point(bounds[0], bounds[1], bounds[2]);
-				Point b = new Point(bounds[0] + bounds[3], bounds[1], bounds[2]);
-				Point c = new Point(bounds[0] + bounds[3], bounds[1] + bounds[4], bounds[2]);
-				Point d = new Point(bounds[0], bounds[1] + bounds[4] + bounds[4], bounds[2]);
-				Point e = new Point(bounds[0], bounds[1], bounds[2] + bounds[5]);
-				Point f = new Point(bounds[0] + bounds[3], bounds[1], bounds[2] + bounds[5]);
-				Point g = new Point(bounds[0] + bounds[3], bounds[1] + bounds[4], bounds[2] + bounds[5]);
-				Point h = new Point(bounds[0], bounds[1] + bounds[4] + bounds[4], bounds[2] + bounds[5]);
-				
-				clippingPlane.add(new Edge(a, b));
-				clippingPlane.add(new Edge(b, c));
-				clippingPlane.add(new Edge(c, d));
-				clippingPlane.add(new Edge(d, a));
-
-				clippingPlane.add(new Edge(e, f));
-				clippingPlane.add(new Edge(f, g));
-				clippingPlane.add(new Edge(g, h));
-				clippingPlane.add(new Edge(h, e));
-
-				clippingPlane.add(new Edge(a, e));
-				clippingPlane.add(new Edge(b, f));
-				clippingPlane.add(new Edge(c, g));
-				clippingPlane.add(new Edge(d, h));
-				
-//				Point plusX = new Point(1, 0, 0);
-//				Point minusX = new Point(-1, 0, 0);
-//				Point plusY = new Point(0, 1, 0);
-//				Point minusY = new Point(0, -1, 0);
-//				Point plusZ = new Point(0, 0, 1);
-//				Point minusZ = new Point(0, 0, -1);
-//				
-//				clippingPlane.add(new Edge(new Point(bounds[0] + bounds[3], 0, 0), plusX));
-//				clippingPlane.add(new Edge(new Point(bounds[0], 0, 0), minusX));
-//				clippingPlane.add(new Edge(new Point(0, bounds[1] + bounds[4], 0), plusY));
-//				clippingPlane.add(new Edge(new Point(0, bounds[1], 0), minusY));
-//				clippingPlane.add(new Edge(new Point(0, 0, bounds[2] + bounds[5]), plusZ));
-//				clippingPlane.add(new Edge(new Point(0, 0, bounds[2]), minusZ));
-
-//				clippingPlane.add(new Edge(a, c));
-//				clippingPlane.add(new Edge(b, g));
-//				clippingPlane.add(new Edge(f, h));
-//				clippingPlane.add(new Edge(a, h));
-//				clippingPlane.add(new Edge(d, g));
-//				clippingPlane.add(new Edge(a, f));
-
-				polygonClipping = new PolygonClipping();
+			prepareBuffers = geometrySettings.has("prepareBuffers") && geometrySettings.get("prepareBuffers").asBoolean();
+			if (prepareBuffers) {
+				transparentGeometryBuffer = new GeometryBuffer();
+				opaqueGeometryBuffer = new GeometryBuffer();
 			}
 			if (quantizeVertices) {
+				if (queryNode.has("loaderSettings")) {
+					ArrayNode vqmNode = (ArrayNode) geometrySettings.get("vertexQuantizationMatrix");
+					if (vqmNode != null) {
+						vertexQuantizationMatrix = new float[16];
+						int i=0;
+						for (JsonNode v : vqmNode) {
+							vertexQuantizationMatrix[i++] = v.floatValue();
+						}
+//						Matrix.dump(vertexQuantizationMatrix);
+					}
+				}
+
 				ObjectNode vqmNode = (ObjectNode) geometrySettings.get("vertexQuantizationMatrices");
 				if (vqmNode != null) {
 					Iterator<String> fieldNames = vqmNode.fieldNames();
@@ -290,10 +245,22 @@ public class BinaryGeometryMessagingStreamingSerializer implements MessagingStre
 		case DATA:
 			if (!writeData()) {
 				serializerDataOutputStream.align8();
-				mode = Mode.END;
+				if (prepareBuffers) {
+					mode = Mode.PREPARED_BUFFER_TRANSPARENT;
+				} else {
+					mode = Mode.END;
+				}
 				return true;
 			}
 			serializerDataOutputStream.align8();
+			break;
+		case PREPARED_BUFFER_TRANSPARENT:
+			writePreparedBuffer(mode);
+			mode = Mode.PREPARED_BUFFER_OPAQUE;
+			break;
+		case PREPARED_BUFFER_OPAQUE:
+			writePreparedBuffer(mode);
+			mode = Mode.END;
 			break;
 		case END:
 			writeEnd();
@@ -303,6 +270,161 @@ public class BinaryGeometryMessagingStreamingSerializer implements MessagingStre
 			break;
 		}
 		return true;
+	}
+
+	private void writePreparedBuffer(Mode mode) throws IOException, SerializerException {
+		GeometryBuffer geometryBuffer = getCurrentBuffer();
+		if (geometryBuffer.isEmpty()) {
+			return;
+		}
+//		LOGGER.info(mode.name());
+//		LOGGER.info("Mapped: " + geometryBuffer.getGeometryMapping().size());
+//		LOGGER.info("Byte size " + geometryBuffer.getPreparedByteSize());
+		int vertexPosition = 0;
+		serializerDataOutputStream.writeByte(mode == Mode.PREPARED_BUFFER_TRANSPARENT ? 7 : 8);
+		ByteBuffer buffer = ByteBuffer.allocate(geometryBuffer.getPreparedByteSize()).order(ByteOrder.LITTLE_ENDIAN);
+		Map<HashMapVirtualObject, HashMapVirtualObject> geometryMapping = geometryBuffer.getGeometryMapping();
+
+		if (geometryMapping.size() != geometryBuffer.getNrObjects()) {
+			System.out.println(geometryMapping.size() + ", " + geometryBuffer.getNrObjects());
+		}
+		buffer.putInt(geometryBuffer.getNrObjects());
+		buffer.putInt(geometryBuffer.getNrIndices());
+		buffer.putInt(geometryBuffer.getNrVertices());
+		buffer.putInt(geometryBuffer.getNrVertices());
+		buffer.putInt(geometryBuffer.getNrColors());
+		int indicesStartByte = 20;
+		int indicesMappingStartByte = indicesStartByte + geometryBuffer.getNrIndices() * 4;
+		int verticesStartByte = indicesMappingStartByte + geometryBuffer.getNrObjects() * 24 + geometryBuffer.getTotalColorPackSize();
+		int normalsStartByte = verticesStartByte + geometryBuffer.getNrVertices() * 2;
+		
+		for (HashMapVirtualObject info : geometryMapping.keySet()) {
+			HashMapVirtualObject data = geometryMapping.get(info);
+
+			DoubleBuffer transformation = ByteBuffer.wrap((byte[]) info.eGet(info.eClass().getEStructuralFeature("transformation"))).order(ByteOrder.LITTLE_ENDIAN).asDoubleBuffer();
+			double[] ms = new double[16];
+			for (int i=0; i<16; i++) {
+				ms[i] = transformation.get();
+			}
+			
+			AbstractHashMapVirtualObject indicesBuffer = data.getDirectFeature(GeometryPackage.eINSTANCE.getGeometryData_Indices());
+			byte[] normals = null;
+			byte[] vertices = null;
+			byte[] colorsQuantized = null;
+			AbstractHashMapVirtualObject normalsBuffer = data.getDirectFeature(GeometryPackage.eINSTANCE.getGeometryData_Normals());
+			normals = (byte[]) normalsBuffer.get("data");
+			AbstractHashMapVirtualObject verticesBuffer = data.getDirectFeature(GeometryPackage.eINSTANCE.getGeometryData_Vertices());
+			vertices = (byte[]) verticesBuffer.get("data");
+			AbstractHashMapVirtualObject colorsBuffer = data.getDirectFeature(GeometryPackage.eINSTANCE.getGeometryData_ColorsQuantized());
+			if (colorsBuffer != null) {
+				colorsQuantized = (byte[]) colorsBuffer.get("data");			
+			}
+			IntBuffer indices = ByteBuffer.wrap((byte[]) indicesBuffer.get("data")).order(ByteOrder.LITTLE_ENDIAN).asIntBuffer();
+
+			Long oid = (Long)info.get("ifcProductOid");
+			buffer.putLong(indicesMappingStartByte, oid);
+			indicesMappingStartByte += 8;
+			buffer.putInt(indicesMappingStartByte, (indicesStartByte - 20) / 4);
+			indicesMappingStartByte += 4;
+			buffer.putInt(indicesMappingStartByte, indices.capacity());
+			indicesMappingStartByte += 4;
+			buffer.putInt(indicesMappingStartByte, vertices.length / 4);
+			indicesMappingStartByte += 4;
+			
+			HashMapVirtualObject colorPack = (HashMapVirtualObject) data.getDirectFeature(GeometryPackage.eINSTANCE.getGeometryData_ColorPack());
+			byte[] colorPackData = colorPack == null ? null : (byte[]) colorPack.eGet(GeometryPackage.eINSTANCE.getColorPack_Data());
+			if (colorPackData == null || colorPackData.length == 0) {
+				buffer.putInt(indicesMappingStartByte, 0);
+				indicesMappingStartByte += 4;
+			} else {
+				int colorPackSize = colorPackData.length / 8;
+				buffer.putInt(indicesMappingStartByte, colorPackSize);
+				indicesMappingStartByte += 4;
+				buffer.position(indicesMappingStartByte);
+				buffer.put(colorPackData);
+				indicesMappingStartByte += colorPackData.length;
+			}
+			
+			for (int i=0; i<indices.capacity(); i++) {
+				int index = indices.get();
+				
+				buffer.putInt(indicesStartByte, index + (vertexPosition / 3));
+				indicesStartByte += 4;
+			}
+			
+			ByteBuffer vertexByteBuffer = ByteBuffer.wrap(vertices).order(ByteOrder.LITTLE_ENDIAN);
+			ByteBuffer normalsByteBuffer = ByteBuffer.wrap(normals).order(ByteOrder.LITTLE_ENDIAN);
+			
+			float[] in = new float[4];
+			float[] vertex = new float[4];
+			float[] result = new float[4];
+			in[3] = 1;
+			vertex[3] = 1;
+			int nrPos = vertexByteBuffer.capacity() / 4;
+			for (int i=0; i<nrPos; i+=3) {
+				in[0] = vertexByteBuffer.getFloat();
+				in[1] = vertexByteBuffer.getFloat();
+				in[2] = vertexByteBuffer.getFloat();
+
+				// Apply the transformation matrix of the object
+				Matrix.multiplyMV(vertex, 0, ms, 0, in, 0);
+				
+				// Possibly convert to mm
+				if (projectInfo.getMultiplierToMm() != 1f) {
+					vertex[0] = vertex[0] * projectInfo.getMultiplierToMm();
+					vertex[1] = vertex[1] * projectInfo.getMultiplierToMm();
+					vertex[2] = vertex[2] * projectInfo.getMultiplierToMm();
+				}
+
+				// Apply quantization matrix
+				Matrix.multiplyMV(result, 0, vertexQuantizationMatrix, 0, vertex, 0);
+				
+				for (int a=0; a<3; a++) {
+					if (result[a] < Short.MIN_VALUE || result[a] > Short.MAX_VALUE) {
+//						System.out.println("err " + result[a]);
+					}
+				}
+				
+				buffer.putShort(verticesStartByte, (short)result[0]);
+				buffer.putShort(verticesStartByte + 2, (short)result[1]);
+				buffer.putShort(verticesStartByte + 4, (short)result[2]);
+
+				verticesStartByte += 6;
+			}
+			
+			vertexPosition += nrPos;
+			
+			double[] inverted = new double[9];
+			double[] transposed = new double[9];
+			double[] mat3 = new double[9];
+			Matrix3.fromMat4(mat3, ms);
+			Matrix3.invert(inverted, mat3);
+			Matrix3.transpose(transposed, inverted);
+			float[] normalIn = new float[3];
+			float[] normal = new float[3];
+
+			// No transformation required for the normals, because tiling only translates, not true, we need to apply the inverse transpose
+			for (int i=0; i<nrPos; i+=3) {
+				normalIn[0] = normalsByteBuffer.getFloat();
+				normalIn[1] = normalsByteBuffer.getFloat();
+				normalIn[2] = normalsByteBuffer.getFloat();
+
+				// Apply the transformation matrix of the object
+				Matrix3.multiplyMV(normal, normalIn, transposed);
+				Vector3.normalize(normal, normal);
+				
+				buffer.put(normalsStartByte, (byte)(normal[0] * 127f));
+				buffer.put(normalsStartByte + 1, (byte)(normal[1] * 127f));
+				buffer.put(normalsStartByte + 2, (byte)(normal[2] * 127f));
+
+				normalsStartByte += 3;
+			}
+			
+//			buffer.position(colorsStartByte);
+//			buffer.put(colorPackData);
+		}
+		serializerDataOutputStream.write(buffer.array());
+		serializerDataOutputStream.align8();
 	}
 
 	private void load() throws SerializerException {
@@ -373,50 +495,67 @@ public class BinaryGeometryMessagingStreamingSerializer implements MessagingStre
 			serializerDataOutputStream.writeDouble(maxBounds.getY());
 			serializerDataOutputStream.writeDouble(maxBounds.getZ());
 		}
-		
-//		modelBounds = new Bounds(minBounds, maxBounds);
-//		modelBoundsUntranslated = new Bounds(projectInfo.getBoundsUntranslated());
 	}
 
 	private boolean writeData() throws IOException, SerializerException {
 		if (next == null) {
 			return false;
 		}
-		if (GeometryPackage.eINSTANCE.getGeometryInfo() == next.eClass()) {
-			writeGeometryInfo(next);
-		} else if (GeometryPackage.eINSTANCE.getGeometryData() == next.eClass()) {
-			writeGeometryData(next, next.getOid());
-		} else {
+		boolean wroteSomething = false;
+		while (!wroteSomething && next != null) {
+			if (GeometryPackage.eINSTANCE.getGeometryInfo() == next.eClass()) {
+				writeGeometryInfo(next);
+				wroteSomething = true;
+			} else if (GeometryPackage.eINSTANCE.getGeometryData() == next.eClass()) {
+				wroteSomething = writeGeometryData(next, next.getOid());
+			}
 			try {
 				next = objectProvider.next();
 			} catch (BimserverDatabaseException e) {
-				e.printStackTrace();
+				LOGGER.error("", e);
 			}
-			return writeData();
-		}
-		try {
-			next = objectProvider.next();
-		} catch (BimserverDatabaseException e) {
-			e.printStackTrace();
 		}
 		return next != null;
 	}
 
 	private void writeGeometryInfo(HashMapVirtualObject info) throws IOException, SerializerException {
 		EStructuralFeature hasTransparencyFeature = info.eClass().getEStructuralFeature("hasTransparency");
+		boolean hasTransparancy = (boolean)info.eGet(hasTransparencyFeature);
+		long geometryDataId = (long)info.eGet(info.eClass().getEStructuralFeature("data"));
+		boolean inPreparedBuffer = false;
+		long oid = (long) info.eGet(GeometryPackage.eINSTANCE.getGeometryInfo_IfcProductOid());
+		if (prepareBuffers && (reusedDataOids == null || !reusedDataOids.contains(geometryDataId))) {
+			inPreparedBuffer = true;
+			if (oidToGeometryData.containsKey(geometryDataId)) {
+				GeometryBuffer currentBuffer = getCurrentBuffer(hasTransparancy);
+				Map<HashMapVirtualObject, HashMapVirtualObject> geometryMapping = currentBuffer.getGeometryMapping();
+				HashMapVirtualObject gd = oidToGeometryData.get(geometryDataId);
+				geometryMapping.put(info, gd);
+				updateSize(gd, currentBuffer);
+			} else {
+				dataToGeometryInfo.put(geometryDataId, info);
+			}
+		}
+		
 		byte[] transformation = (byte[]) info.eGet(info.eClass().getEStructuralFeature("transformation"));
-		long dataOid = (long) info.eGet(info.eClass().getEStructuralFeature("data"));
+		long dataOid = geometryDataId;
 		
 		serializerDataOutputStream.writeByte(MessageType.GEOMETRY_INFO.getId());
-		long oid = (long) info.eGet(GeometryPackage.eINSTANCE.getGeometryInfo_IfcProductOid());
+		serializerDataOutputStream.writeByte(inPreparedBuffer ? (byte)1 : (byte)0);
 		serializerDataOutputStream.writeLong(oid);
 		String type = objectProvider.getEClassForOid(oid).getName();
 		serializerDataOutputStream.writeUTF(type);
+		int nrColors = (int)info.eGet(GeometryPackage.eINSTANCE.getGeometryInfo_NrColors());
+		if (nrColors == 0) {
+			int nrVertices = (int)info.eGet(GeometryPackage.eINSTANCE.getGeometryInfo_NrVertices());
+			nrColors = nrVertices / 3 * 4;
+		}
+		serializerDataOutputStream.writeInt(nrColors);
 		serializerDataOutputStream.align8();
 		serializerDataOutputStream.ensureExtraCapacity(24);
 		serializerDataOutputStream.writeLongUnchecked(info.getRoid());
 		serializerDataOutputStream.writeLongUnchecked(info.getOid());
-		serializerDataOutputStream.writeLongUnchecked((boolean)info.eGet(hasTransparencyFeature) ? 1 : 0);
+		serializerDataOutputStream.writeLongUnchecked(hasTransparancy ? 1 : 0);
 		HashMapWrappedVirtualObject bounds = (HashMapWrappedVirtualObject) info.eGet(info.eClass().getEStructuralFeature("bounds"));
 		HashMapWrappedVirtualObject minBounds = (HashMapWrappedVirtualObject) bounds.eGet(bounds.eClass().getEStructuralFeature("min"));
 		HashMapWrappedVirtualObject maxBounds = (HashMapWrappedVirtualObject) bounds.eGet(bounds.eClass().getEStructuralFeature("max"));
@@ -445,8 +584,8 @@ public class BinaryGeometryMessagingStreamingSerializer implements MessagingStre
 		serializerDataOutputStream.writeDoubleUnchecked(maxZ);
 		lastTransformation = ByteBuffer.wrap(transformation);
 		lastTransformation.order(ByteOrder.LITTLE_ENDIAN);
-		asDoubleBuffer = lastTransformation.asDoubleBuffer();
-		ms = new double[16];
+		DoubleBuffer asDoubleBuffer = lastTransformation.asDoubleBuffer();
+		double[] ms = new double[16];
 		for (int i=0; i<16; i++) {
 			ms[i] = asDoubleBuffer.get();
 		}
@@ -456,14 +595,7 @@ public class BinaryGeometryMessagingStreamingSerializer implements MessagingStre
 		
 		serializerDataOutputStream.write(transformation);
 		
-		long newDataOid = -1;
-		if (dataOidsWritten.containsKey(dataOid)) {
-			// Make up a unique id...
-			newDataOid = dataOid + 10000000000L + dataOidsWritten.get(dataOid);
-			serializerDataOutputStream.writeLong(newDataOid);
-		} else {
-			serializerDataOutputStream.writeLong(dataOid);
-		}
+		serializerDataOutputStream.writeLong(dataOid);
 		
 		nrObjectsWritten++;
 		if (reportProgress) {
@@ -471,18 +603,25 @@ public class BinaryGeometryMessagingStreamingSerializer implements MessagingStre
 				progressReporter.update(nrObjectsWritten, size);
 			}
 		}
-		
-		if (dataOidsWritten.containsKey(dataOid)) {
-			HashMapVirtualObject data = objectProvider.getByOid(dataOid);
-			writeGeometryData(data, newDataOid);
-			// This data was written before (and splitTriangles is on)
-			// We need to write the data again (deduplicate) because the clipping should probably be different
-		}
 	}
 
-	private void writeGeometryData(HashMapVirtualObject data, long oid) throws IOException, SerializerException {
+	private boolean writeGeometryData(HashMapVirtualObject data, long oid) throws IOException, SerializerException {
 		// This geometry info is pointing to a not-yet-sent geometry data, so we send that first
 		// This way the client can be sure that geometry data is always available when geometry info is received, simplifying bookkeeping
+		EStructuralFeature hasTransparencyFeature = data.eClass().getEStructuralFeature("hasTransparency");
+		boolean hasTransparancy = (boolean)data.eGet(hasTransparencyFeature);
+
+		if (prepareBuffers && (reusedDataOids == null || !reusedDataOids.contains(oid))) {
+			oidToGeometryData.put(oid, data);
+			if (dataToGeometryInfo.containsKey(oid)) {
+				GeometryBuffer currentBuffer = getCurrentBuffer(hasTransparancy);
+				Map<HashMapVirtualObject, HashMapVirtualObject> geometryMapping = currentBuffer.getGeometryMapping();
+				geometryMapping.put(dataToGeometryInfo.get(oid), data);
+				updateSize(data, currentBuffer);
+			}
+			return false;
+		}
+		
 		EStructuralFeature indicesFeature = data.eClass().getEStructuralFeature("indices");
 		EStructuralFeature verticesFeature = data.eClass().getEStructuralFeature("vertices");
 		EStructuralFeature verticesQuantizedFeature = data.eClass().getEStructuralFeature("verticesQuantized");
@@ -491,23 +630,22 @@ public class BinaryGeometryMessagingStreamingSerializer implements MessagingStre
 		EStructuralFeature colorsFeature = data.eClass().getEStructuralFeature("colorsQuantized");
 		EStructuralFeature colorFeature = data.eClass().getEStructuralFeature("color");
 		EStructuralFeature mostUsedColorFeature = data.eClass().getEStructuralFeature("mostUsedColor");
-		EStructuralFeature hasTransparencyFeature = data.eClass().getEStructuralFeature("hasTransparency");
 
 		AbstractHashMapVirtualObject indicesBuffer = data.getDirectFeature(indicesFeature);
 		byte[] normals = null;
 		byte[] normalsQuantized = null;
 		byte[] vertices = null;
 		byte[] verticesQuantized = null;
-		if (quantizeNormals) {
-			AbstractHashMapVirtualObject normalsBuffer = data.getDirectFeature(normalsQuantizedFeature);
-			normalsQuantized = (byte[]) normalsBuffer.get("data");
+		AbstractHashMapVirtualObject quantizedNormalsBuffer = data.getDirectFeature(normalsQuantizedFeature);
+		if (quantizeNormals && quantizedNormalsBuffer != null) {
+			normalsQuantized = (byte[]) quantizedNormalsBuffer.get("data");
 		} else {
 			AbstractHashMapVirtualObject normalsBuffer = data.getDirectFeature(normalsFeature);
 			normals = (byte[]) normalsBuffer.get("data");
 		}
-		if (quantizeVertices) {
-			AbstractHashMapVirtualObject verticesBuffer = data.getDirectFeature(verticesQuantizedFeature);
-			verticesQuantized = (byte[]) verticesBuffer.get("data");
+		AbstractHashMapVirtualObject quantizedVerticesBuffer = data.getDirectFeature(verticesQuantizedFeature);
+		if (quantizeVertices && quantizedVerticesBuffer != null) {
+			verticesQuantized = (byte[]) quantizedVerticesBuffer.get("data");
 		} else {
 			AbstractHashMapVirtualObject verticesBuffer = data.getDirectFeature(verticesFeature);
 			vertices = (byte[]) verticesBuffer.get("data");
@@ -532,7 +670,7 @@ public class BinaryGeometryMessagingStreamingSerializer implements MessagingStre
 			String type = objectProvider.getEClassForCid(cid).getName();
 			serializerDataOutputStream.writeUTF(type);
 			serializerDataOutputStream.align8();
-			serializerDataOutputStream.writeLong((boolean)data.eGet(hasTransparencyFeature) ? 1 : 0);
+			serializerDataOutputStream.writeLong(hasTransparancy ? 1 : 0);
 			serializerDataOutputStream.writeLong(data.getOid());
 			
 			// Split geometry, this algorithm - for now - just throws away all the reuse of vertices that might be there
@@ -659,345 +797,127 @@ public class BinaryGeometryMessagingStreamingSerializer implements MessagingStre
 			serializerDataOutputStream.writeLong(roid);
 			serializerDataOutputStream.writeLong(croid);
 
-			serializerDataOutputStream.writeLong((boolean)data.eGet(hasTransparencyFeature) ? 1 : 0);
+			serializerDataOutputStream.writeLong(hasTransparancy ? 1 : 0);
 			serializerDataOutputStream.writeLong(oid);
 			
-			if (splitTriangles) {
-				if (useSmallInts || quantizeVertices || quantizeNormals) {
-					throw new UnsupportedOperationException();
+			ByteBuffer indicesByteBuffer = ByteBuffer.wrap(indices);
+			indicesByteBuffer.order(ByteOrder.LITTLE_ENDIAN);
+			serializerDataOutputStream.writeInt(indicesByteBuffer.capacity() / 4);
+			if (useSmallInts) {
+				IntBuffer intBuffer = indicesByteBuffer.asIntBuffer();
+				serializerDataOutputStream.ensureExtraCapacity(intBuffer.capacity() * 2);
+				for (int i=0; i<intBuffer.capacity(); i++) {
+					serializerDataOutputStream.writeShortUnchecked((short) intBuffer.get());
 				}
-				
-				if (dataOidsWritten.containsKey(data.getOid())) {
-					dataOidsWritten.put(data.getOid(), dataOidsWritten.get(data.getOid()) + 1);
-				} else {
-					dataOidsWritten.put(data.getOid(), 1);
-					objectProvider.cache(data);
-				}
-				
-				ByteBuffer indicesByteBuffer = ByteBuffer.wrap(indices);
-				indicesByteBuffer.order(ByteOrder.LITTLE_ENDIAN);
-				IntBuffer indicesInt = indicesByteBuffer.asIntBuffer();
-				
-				ByteBuffer vertexByteBuffer = ByteBuffer.wrap(vertices);
-				vertexByteBuffer.order(ByteOrder.LITTLE_ENDIAN);
-				FloatBuffer vertexBuffer = vertexByteBuffer.asFloatBuffer();
-
-				ByteBuffer normalsByteBuffer = ByteBuffer.wrap(normals);
-				normalsByteBuffer.order(ByteOrder.LITTLE_ENDIAN);
-				FloatBuffer normalBuffer = normalsByteBuffer.asFloatBuffer();
-				
-				ByteBuffer materialsByteBuffer = ByteBuffer.wrap(colors);
-				materialsByteBuffer.order(ByteOrder.LITTLE_ENDIAN);
-				FloatBuffer materialsFloatBuffer = materialsByteBuffer.asFloatBuffer();
-				
-				List<Integer> newIndices = new ArrayList<>();
-				List<Float> newVertices = new ArrayList<>();
-				List<Float> newColors = new ArrayList<>();
-				List<Float> newNormals = new ArrayList<>();
-
-				int c = 0;
-				for (int i=0; i<indicesInt.capacity(); i+=3) {
-					int index1 = indicesInt.get(i);
-					int index2 = indicesInt.get(i + 1);
-					int index3 = indicesInt.get(i + 2);
-					
-					// Assuming all 3 vertices have the same normal and that it stays the same...
-					float[] normal = new float[]{normalBuffer.get(index1 * 3), normalBuffer.get(index1 * 3 + 1), normalBuffer.get(index1 * 3 + 2)};
-					float[] triangleColor = null;
-					if (!useSingleColors && colors != null && color == null) {
-						triangleColor = new float[]{materialsFloatBuffer.get(index1 * 3), materialsFloatBuffer.get(index1 * 3 + 1), materialsFloatBuffer.get(index1 * 3 + 2), materialsFloatBuffer.get(index1 * 3 + 3)};
-					}
-					
-					float[] r = new float[4];
-					
-//					C = (P1+P2+P3)/3 = ((x1+x2+x3)/3,(y1+y2+y3)/3,(z1+z2+z3)/3)
-					
-					ArrayList<Point> points = new ArrayList<>();
-
-					float[] v1 = new float[]{vertexBuffer.get(index1 * 3), vertexBuffer.get(index1 * 3 + 1), vertexBuffer.get(index1 * 3 + 2), 1};
-					Matrix.multiplyMV(r, 0, ms, 0, v1, 0);
-					v1 = new float[]{r[0], r[1], r[2], r[3]};
-					if (normalizeUnitsToMM && projectInfo.getMultiplierToMm() != 1f) {
-						v1[0] = v1[0] * projectInfo.getMultiplierToMm();
-						v1[1] = v1[1] * projectInfo.getMultiplierToMm();
-						v1[2] = v1[2] * projectInfo.getMultiplierToMm();
-					}
-					points.add(new Point(v1[0], v1[1], v1[2]));
-
-					float[] v2 = new float[]{vertexBuffer.get(index2 * 3), vertexBuffer.get(index2 * 3 + 1), vertexBuffer.get(index2 * 3 + 2), 1};
-					Matrix.multiplyMV(r, 0, ms, 0, v2, 0);
-					v2 = new float[]{r[0], r[1], r[2], r[3]};
-					if (normalizeUnitsToMM && projectInfo.getMultiplierToMm() != 1f) {
-						v2[0] = v2[0] * projectInfo.getMultiplierToMm();
-						v2[1] = v2[1] * projectInfo.getMultiplierToMm();
-						v2[2] = v2[2] * projectInfo.getMultiplierToMm();
-					}
-					points.add(new Point(v2[0], v2[1], v2[2]));
-
-					float[] v3 = new float[]{vertexBuffer.get(index3 * 3), vertexBuffer.get(index3 * 3 + 1), vertexBuffer.get(index3 * 3 + 2), 1};
-					Matrix.multiplyMV(r, 0, ms, 0, v3, 0);
-					v3 = new float[]{r[0], r[1], r[2], r[3]};
-					if (normalizeUnitsToMM && projectInfo.getMultiplierToMm() != 1f) {
-						v3[0] = v3[0] * projectInfo.getMultiplierToMm();
-						v3[1] = v3[1] * projectInfo.getMultiplierToMm();
-						v3[2] = v3[2] * projectInfo.getMultiplierToMm();
-					}
-					points.add(new Point(v3[0], v3[1], v3[2]));
-					
-					float[] centroid = new float[]{(v1[0] + v2[0] + v3[0])/3f, (v1[1] + v2[1] + v3[1])/3f, (v1[2] + v2[2] + v3[2])/3f};
-					if (centroid[0] >= bounds[0] && centroid[1] >= bounds[1] && centroid[2] >= bounds[2] && centroid[0] <= bounds[0] + bounds[3] && centroid[1] <= bounds[1] + bounds[4] && centroid[2] <= bounds[2] + bounds[5]) {
-						newVertices.add(v1[0]);
-						newVertices.add(v1[1]);
-						newVertices.add(v1[2]);
-						
-						newVertices.add(v2[0]);
-						newVertices.add(v2[1]);
-						newVertices.add(v2[2]);
-
-						newVertices.add(v3[0]);
-						newVertices.add(v3[1]);
-						newVertices.add(v3[2]);
-						
-						if (!useSingleColors && colors != null && color == null) {
-							newColors.add(triangleColor[0]);
-							newColors.add(triangleColor[1]);
-							newColors.add(triangleColor[2]);
-							newColors.add(triangleColor[3]);
-							newColors.add(triangleColor[0]);
-							newColors.add(triangleColor[1]);
-							newColors.add(triangleColor[2]);
-							newColors.add(triangleColor[3]);
-							newColors.add(triangleColor[0]);
-							newColors.add(triangleColor[1]);
-							newColors.add(triangleColor[2]);
-							newColors.add(triangleColor[3]);
-						}
-						
-						newNormals.add(normal[0]);
-						newNormals.add(normal[1]);
-						newNormals.add(normal[2]);
-						
-						newNormals.add(normal[0]);
-						newNormals.add(normal[1]);
-						newNormals.add(normal[2]);
-						
-						newNormals.add(normal[0]);
-						newNormals.add(normal[1]);
-						newNormals.add(normal[2]);
-						
-						newIndices.add(c + 0);
-						newIndices.add(c + 1);
-						newIndices.add(c + 2);
-						
-						c += 3;
-					}
-					
-//					try {
-//						ArrayList<Point> results = polygonClipping.clippingAlg(points, clippingPlane);
-//						for (int j=0; j<results.size(); j++) {
-//							Point a = results.get(j);
-//							
-//							newVertices.add((float) a.getX());
-//							newVertices.add((float) a.getY());
-//							newVertices.add((float) a.getZ());
-//							
-//							newNormals.add(normal[0]);
-//							newNormals.add(normal[1]);
-//							newNormals.add(normal[2]);
-//						}
-//						
-//						if (results.size() > 0) {
-//							for (int j=1; j<results.size() - 1; j++) {
-//								newIndices.add(c + 0); // First vertex, making a fan
-//								newIndices.add(c + j);
-//								newIndices.add(c + j + 1);
-//							}
-//						}
-//						
-//						c += results.size();
-//					} catch (ArrayIndexOutOfBoundsException e) {
-//						e.printStackTrace();
-//					}
-				}
-				
-				serializerDataOutputStream.writeInt(newIndices.size());
-				for (int index : newIndices) {
-					serializerDataOutputStream.writeInt(index);
-				}
-				
-				if (color != null) {
-					serializerDataOutputStream.writeInt(1);
-					serializerDataOutputStream.writeFloat((float)color.eGet("x"));
-					serializerDataOutputStream.writeFloat((float)color.eGet("y"));
-					serializerDataOutputStream.writeFloat((float)color.eGet("z"));
-					serializerDataOutputStream.writeFloat((float)color.eGet("w"));
-				} else {
-					if (useSingleColors && mostUsedColor != null) {
-						serializerDataOutputStream.writeInt(1);
-						serializerDataOutputStream.writeFloat((float)mostUsedColor.eGet("x"));
-						serializerDataOutputStream.writeFloat((float)mostUsedColor.eGet("y"));
-						serializerDataOutputStream.writeFloat((float)mostUsedColor.eGet("z"));
-						serializerDataOutputStream.writeFloat((float)mostUsedColor.eGet("w"));
-					} else {
-						serializerDataOutputStream.writeInt(0);
-					}
-					
-				}
-				serializerDataOutputStream.writeInt(newVertices.size());
-				for (int i=0; i<newVertices.size(); i+=3) {
-					float[] v = new float[]{newVertices.get(i), newVertices.get(i + 1), newVertices.get(i + 2), 1};
-					float[] r = new float[4];
-					if (normalizeUnitsToMM && projectInfo.getMultiplierToMm() != 1f) {
-						v[0] = v[0] / projectInfo.getMultiplierToMm();
-						v[1] = v[1] / projectInfo.getMultiplierToMm();
-						v[2] = v[2] / projectInfo.getMultiplierToMm();
-					}
-					// TODO !!!! When the inverse is not valid, we need to do something with this information
-					Matrix.multiplyMV(r, 0, inverse, 0, v, 0);
-					if (normalizeUnitsToMM && projectInfo.getMultiplierToMm() != 1f) {
-						r[0] = r[0] * projectInfo.getMultiplierToMm();
-						r[1] = r[1] * projectInfo.getMultiplierToMm();
-						r[2] = r[2] * projectInfo.getMultiplierToMm();
-					}
-					serializerDataOutputStream.writeFloat(r[0]);
-					serializerDataOutputStream.writeFloat(r[1]);
-					serializerDataOutputStream.writeFloat(r[2]);
-				}
-				
-				serializerDataOutputStream.writeInt(newNormals.size());
-				for (float v : newNormals) {
-					serializerDataOutputStream.writeFloat(v);
-				}
-
-				// Only when materials are used we send them
-				if (!useSingleColors && colors != null && color == null) {
-					serializerDataOutputStream.writeInt(newColors.size());
-					for (int i=0; i<newColors.size(); i++) {
-						serializerDataOutputStream.writeFloat(newColors.get(i));
-					}
-				} else {
-					// No materials used
-					serializerDataOutputStream.writeInt(0);
-				}					
+				serializerDataOutputStream.align4();
 			} else {
-				ByteBuffer indicesByteBuffer = ByteBuffer.wrap(indices);
-				indicesByteBuffer.order(ByteOrder.LITTLE_ENDIAN);
-				serializerDataOutputStream.writeInt(indicesByteBuffer.capacity() / 4);
-				if (useSmallInts) {
-					IntBuffer intBuffer = indicesByteBuffer.asIntBuffer();
-					serializerDataOutputStream.ensureExtraCapacity(intBuffer.capacity() * 2);
-					for (int i=0; i<intBuffer.capacity(); i++) {
-						serializerDataOutputStream.writeShortUnchecked((short) intBuffer.get());
-					}
-					serializerDataOutputStream.align4();
-				} else {
-					serializerDataOutputStream.write(indicesByteBuffer.array());
-				}
-				// Added in version 11
-				if (color != null) {
+				serializerDataOutputStream.write(indicesByteBuffer.array());
+			}
+			// Added in version 11
+			if (color != null) {
+				serializerDataOutputStream.writeInt(1);
+				serializerDataOutputStream.writeFloat((float)color.eGet("x"));
+				serializerDataOutputStream.writeFloat((float)color.eGet("y"));
+				serializerDataOutputStream.writeFloat((float)color.eGet("z"));
+				serializerDataOutputStream.writeFloat((float)color.eGet("w"));
+			} else {
+				if (useSingleColors && mostUsedColor != null) {
 					serializerDataOutputStream.writeInt(1);
-					serializerDataOutputStream.writeFloat((float)color.eGet("x"));
-					serializerDataOutputStream.writeFloat((float)color.eGet("y"));
-					serializerDataOutputStream.writeFloat((float)color.eGet("z"));
-					serializerDataOutputStream.writeFloat((float)color.eGet("w"));
+					serializerDataOutputStream.writeFloat((float)mostUsedColor.eGet("x"));
+					serializerDataOutputStream.writeFloat((float)mostUsedColor.eGet("y"));
+					serializerDataOutputStream.writeFloat((float)mostUsedColor.eGet("z"));
+					serializerDataOutputStream.writeFloat((float)mostUsedColor.eGet("w"));
 				} else {
-					if (useSingleColors && mostUsedColor != null) {
-						serializerDataOutputStream.writeInt(1);
-						serializerDataOutputStream.writeFloat((float)mostUsedColor.eGet("x"));
-						serializerDataOutputStream.writeFloat((float)mostUsedColor.eGet("y"));
-						serializerDataOutputStream.writeFloat((float)mostUsedColor.eGet("z"));
-						serializerDataOutputStream.writeFloat((float)mostUsedColor.eGet("w"));
-					} else {
-						serializerDataOutputStream.writeInt(0);
-					}
+					serializerDataOutputStream.writeInt(0);
 				}
+			}
 
-				if (quantizeVertices) {
-					if (data.has("verticesQuantized") && normalizeUnitsToMM) {
-						serializerDataOutputStream.writeInt(verticesQuantized.length / 2);
-						serializerDataOutputStream.write(verticesQuantized);
-						serializerDataOutputStream.align8();
-					} else {
-						ByteBuffer vertexByteBuffer = ByteBuffer.wrap(vertices);
-						int nrPos = vertexByteBuffer.capacity() / 4;
-						serializerDataOutputStream.writeInt(nrPos);
-
-						vertexByteBuffer.order(ByteOrder.LITTLE_ENDIAN);
-						serializerDataOutputStream.ensureExtraCapacity(vertexByteBuffer.capacity() * 6 / 4);
-						float[] vertex = new float[4];
-						float[] result = new float[4];
-						vertex[3] = 1;
-						for (int i=0; i<nrPos; i+=3) {
-							vertex[0] = vertexByteBuffer.getFloat();
-							vertex[1] = vertexByteBuffer.getFloat();
-							vertex[2] = vertexByteBuffer.getFloat();
-							
-							if (normalizeUnitsToMM && projectInfo.getMultiplierToMm() != 1f) {
-								vertex[0] = vertex[0] * projectInfo.getMultiplierToMm();
-								vertex[1] = vertex[1] * projectInfo.getMultiplierToMm();
-								vertex[2] = vertex[2] * projectInfo.getMultiplierToMm();
-							}
-							
-							float[] matrix = vertexQuantizationMatrices.get(croid);
-							if (matrix == null) {
-								LOGGER.error("Missing quant matrix for " + croid);
-								return;
-							}
-							Matrix.multiplyMV(result, 0, matrix, 0, vertex, 0);
-							
-							serializerDataOutputStream.writeShortUnchecked((short)result[0]);
-							serializerDataOutputStream.writeShortUnchecked((short)result[1]);
-							serializerDataOutputStream.writeShortUnchecked((short)result[2]);
-						}
-						serializerDataOutputStream.align8();
-					}
+			if (quantizeVertices) {
+				if (verticesQuantized != null && normalizeUnitsToMM) {
+					serializerDataOutputStream.writeInt(verticesQuantized.length / 2);
+					serializerDataOutputStream.write(verticesQuantized);
+					serializerDataOutputStream.align8();
 				} else {
 					ByteBuffer vertexByteBuffer = ByteBuffer.wrap(vertices);
 					int nrPos = vertexByteBuffer.capacity() / 4;
 					serializerDataOutputStream.writeInt(nrPos);
-					if (normalizeUnitsToMM && projectInfo.getMultiplierToMm() != 1f) {
-						vertexByteBuffer.order(ByteOrder.LITTLE_ENDIAN);
-						serializerDataOutputStream.ensureExtraCapacity(vertexByteBuffer.capacity() * 6 / 4); // TODO unchecked
-						float[] vertex = new float[3];
-						for (int i=0; i<nrPos; i+=3) {
-							vertex[0] = vertexByteBuffer.getFloat();
-							vertex[1] = vertexByteBuffer.getFloat();
-							vertex[2] = vertexByteBuffer.getFloat();
+
+					vertexByteBuffer.order(ByteOrder.LITTLE_ENDIAN);
+					serializerDataOutputStream.ensureExtraCapacity(vertexByteBuffer.capacity() * 6 / 4);
+					float[] vertex = new float[4];
+					float[] result = new float[4];
+					vertex[3] = 1;
+					for (int i=0; i<nrPos; i+=3) {
+						vertex[0] = vertexByteBuffer.getFloat();
+						vertex[1] = vertexByteBuffer.getFloat();
+						vertex[2] = vertexByteBuffer.getFloat();
+						
+						if (normalizeUnitsToMM && projectInfo.getMultiplierToMm() != 1f) {
 							vertex[0] = vertex[0] * projectInfo.getMultiplierToMm();
 							vertex[1] = vertex[1] * projectInfo.getMultiplierToMm();
 							vertex[2] = vertex[2] * projectInfo.getMultiplierToMm();
-							
-							// TODO slow
-							serializerDataOutputStream.writeFloatUnchecked(vertex[0]);
-							serializerDataOutputStream.writeFloatUnchecked(vertex[1]);
-							serializerDataOutputStream.writeFloatUnchecked(vertex[2]);
 						}
-					} else {
-						serializerDataOutputStream.write(vertexByteBuffer.array());
+						
+//						float[] matrix = vertexQuantizationMatrices.get(croid);
+						float[] matrix = vertexQuantizationMatrix;
+						if (matrix == null) {
+							LOGGER.error("Missing quant matrix for " + croid);
+							return false;
+						}
+						Matrix.multiplyMV(result, 0, matrix, 0, vertex, 0);
+						
+						serializerDataOutputStream.writeShortUnchecked((short)result[0]);
+						serializerDataOutputStream.writeShortUnchecked((short)result[1]);
+						serializerDataOutputStream.writeShortUnchecked((short)result[2]);
 					}
-				}
-				
-				if (quantizeNormals) {
-					serializerDataOutputStream.writeInt(normalsQuantized.length);
-					serializerDataOutputStream.write(normalsQuantized);
 					serializerDataOutputStream.align8();
-				} else {
-					serializerDataOutputStream.writeInt(normals.length / 4);
-					serializerDataOutputStream.write(normals);
 				}
-				
-				if (useSingleColors) {
-					serializerDataOutputStream.writeInt(0);
+			} else {
+				ByteBuffer vertexByteBuffer = ByteBuffer.wrap(vertices);
+				int nrPos = vertexByteBuffer.capacity() / 4;
+				serializerDataOutputStream.writeInt(nrPos);
+				if (normalizeUnitsToMM && projectInfo.getMultiplierToMm() != 1f) {
+					vertexByteBuffer.order(ByteOrder.LITTLE_ENDIAN);
+					serializerDataOutputStream.ensureExtraCapacity(vertexByteBuffer.capacity() * 6 / 4); // TODO unchecked
+					float[] vertex = new float[3];
+					for (int i=0; i<nrPos; i+=3) {
+						vertex[0] = vertexByteBuffer.getFloat();
+						vertex[1] = vertexByteBuffer.getFloat();
+						vertex[2] = vertexByteBuffer.getFloat();
+						vertex[0] = vertex[0] * projectInfo.getMultiplierToMm();
+						vertex[1] = vertex[1] * projectInfo.getMultiplierToMm();
+						vertex[2] = vertex[2] * projectInfo.getMultiplierToMm();
+						
+						serializerDataOutputStream.writeFloatUnchecked(vertex[0]);
+						serializerDataOutputStream.writeFloatUnchecked(vertex[1]);
+						serializerDataOutputStream.writeFloatUnchecked(vertex[2]);
+					}
 				} else {
-					if (colors == null) {
-						// We need to generate them
-						if (color == null) {
-							serializerDataOutputStream.writeInt(0);
-							return;
-						} else {
-							serializerDataOutputStream.writeInt(0);
-							return;
-						}
+					serializerDataOutputStream.write(vertexByteBuffer.array());
+				}
+			}
+			
+			if (quantizeNormals && normalsQuantized != null) {
+				serializerDataOutputStream.writeInt(normalsQuantized.length);
+				serializerDataOutputStream.write(normalsQuantized);
+				serializerDataOutputStream.align8();
+			} else {
+				serializerDataOutputStream.writeInt(normals.length / 4);
+				serializerDataOutputStream.write(normals);
+			}
+			
+			if (useSingleColors) {
+				serializerDataOutputStream.writeInt(0);
+			} else {
+				if (colors == null) {
+					// We need to generate them
+					if (color == null) {
+						serializerDataOutputStream.writeInt(0);
+						return true;
+					} else {
+						serializerDataOutputStream.writeInt(0);
+						return true;
+					}
 //						int nrVertices = 0;
 //						if (vertices == null) {
 //							nrVertices = verticesQuantized.length / 6;
@@ -1021,22 +941,60 @@ public class BinaryGeometryMessagingStreamingSerializer implements MessagingStre
 //								serializerDataOutputStream.writeFloatUnchecked((float) color.eGet("w"));
 //							}
 //						}
+				} else {
+					ByteBuffer materialsByteBuffer = ByteBuffer.wrap(colors);
+					serializerDataOutputStream.writeInt(materialsByteBuffer.capacity());
+					if (quantizeColors) {
+						serializerDataOutputStream.write(materialsByteBuffer.array());
 					} else {
-						ByteBuffer materialsByteBuffer = ByteBuffer.wrap(colors);
-						serializerDataOutputStream.writeInt(materialsByteBuffer.capacity());
-						if (quantizeColors) {
-							serializerDataOutputStream.write(materialsByteBuffer.array());
-						} else {
-							serializerDataOutputStream.ensureExtraCapacity(materialsByteBuffer.capacity() * 4);
-							for (int i=0; i<materialsByteBuffer.capacity(); i++) {
-								byte b = materialsByteBuffer.get(i);
-								float f = UnsignedBytes.toInt(b) / 255f;
-								serializerDataOutputStream.writeFloatUnchecked(f);
-							}
+						serializerDataOutputStream.ensureExtraCapacity(materialsByteBuffer.capacity() * 4);
+						for (int i=0; i<materialsByteBuffer.capacity(); i++) {
+							byte b = materialsByteBuffer.get(i);
+							float f = UnsignedBytes.toInt(b) / 255f;
+							serializerDataOutputStream.writeFloatUnchecked(f);
 						}
 					}
 				}
 			}
+		}
+		return true;
+	}
+
+	private void updateSize(HashMapVirtualObject data, GeometryBuffer geometryBuffer) {
+		int nrIndices = (int)data.eGet(GeometryPackage.eINSTANCE.getGeometryData_NrIndices());
+		int nrVertices = (int)data.eGet(GeometryPackage.eINSTANCE.getGeometryData_NrVertices());
+
+		HashMapVirtualObject colorPack = (HashMapVirtualObject) data.getDirectFeature(GeometryPackage.eINSTANCE.getGeometryData_ColorPack());
+		byte[] colorPackData = colorPack == null ? null : (byte[]) colorPack.eGet(GeometryPackage.eINSTANCE.getColorPack_Data());
+		
+		geometryBuffer.incNrIndices(nrIndices);
+		geometryBuffer.incNrVertices(nrVertices);
+		geometryBuffer.incNrColors(colorPackData == null ? 0 : colorPackData.length);
+		geometryBuffer.incTotalColorPackSize(colorPackData == null ? 0 : colorPackData.length);
+		geometryBuffer.incNrObjects();
+		
+		geometryBuffer.incPreparedSize( 
+			nrIndices * 4 + // Each index number uses 4 bytes
+			nrVertices * 2 + // Each vertex uses 2 bytes (quantized) per number
+			nrVertices * 1 + // Each vertex uses 1 byte per number for (quantized) normals
+			(colorPackData == null ? 0 : colorPackData.length) + //
+			24); // 8 for the oid, 4 for the startIndex, 4 for the nrIndices
+	}
+	
+	private GeometryBuffer getCurrentBuffer() {
+		if (mode == Mode.PREPARED_BUFFER_TRANSPARENT) {
+			return transparentGeometryBuffer;
+		} else if (mode == Mode.PREPARED_BUFFER_OPAQUE) {
+			return opaqueGeometryBuffer;
+		}
+		return null;
+	}
+
+	private GeometryBuffer getCurrentBuffer(boolean hasTransparency) {
+		if (hasTransparency) {
+			return transparentGeometryBuffer;
+		} else {
+			return opaqueGeometryBuffer;
 		}
 	}
 
