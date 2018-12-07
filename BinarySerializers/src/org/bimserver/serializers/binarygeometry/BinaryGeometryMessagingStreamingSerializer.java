@@ -50,7 +50,6 @@ import org.bimserver.serializers.binarygeometry.clipping.Point;
 import org.bimserver.shared.AbstractHashMapVirtualObject;
 import org.bimserver.shared.HashMapVirtualObject;
 import org.bimserver.shared.HashMapWrappedVirtualObject;
-import org.eclipse.emf.ecore.EClass;
 import org.eclipse.emf.ecore.EStructuralFeature;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -310,15 +309,10 @@ public class BinaryGeometryMessagingStreamingSerializer implements MessagingStre
 			AbstractHashMapVirtualObject indicesBuffer = data.getDirectFeature(GeometryPackage.eINSTANCE.getGeometryData_Indices());
 			byte[] normals = null;
 			byte[] vertices = null;
-			byte[] colorsQuantized = null;
 			AbstractHashMapVirtualObject normalsBuffer = data.getDirectFeature(GeometryPackage.eINSTANCE.getGeometryData_Normals());
 			normals = (byte[]) normalsBuffer.get("data");
 			AbstractHashMapVirtualObject verticesBuffer = data.getDirectFeature(GeometryPackage.eINSTANCE.getGeometryData_Vertices());
 			vertices = (byte[]) verticesBuffer.get("data");
-			AbstractHashMapVirtualObject colorsBuffer = data.getDirectFeature(GeometryPackage.eINSTANCE.getGeometryData_ColorsQuantized());
-			if (colorsBuffer != null) {
-				colorsQuantized = (byte[]) colorsBuffer.get("data");			
-			}
 			IntBuffer indices = ByteBuffer.wrap((byte[]) indicesBuffer.get("data")).order(ByteOrder.LITTLE_ENDIAN).asIntBuffer();
 
 			Long oid = (Long)info.get("ifcProductOid");
