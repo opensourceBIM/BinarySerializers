@@ -992,6 +992,7 @@ public class BinaryGeometryMessagingStreamingSerializer implements MessagingStre
 		}
 	}
 
+	@SuppressWarnings("unused")
 	private boolean inside(Point a, double[] bounds) {
 		if (a.getX() < bounds[0] || a.getY() < bounds[1] || a.getZ() < bounds[2] || a.getX() > bounds[3] || a.getY() > bounds[4] || a.getZ() > bounds[5]) {
 			return false;
