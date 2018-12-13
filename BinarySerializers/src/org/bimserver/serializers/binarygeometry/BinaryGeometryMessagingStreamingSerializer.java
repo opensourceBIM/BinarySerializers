@@ -277,17 +277,11 @@ public class BinaryGeometryMessagingStreamingSerializer implements MessagingStre
 		if (geometryBuffer.isEmpty()) {
 			return;
 		}
-//		LOGGER.info(mode.name());
-//		LOGGER.info("Mapped: " + geometryBuffer.getGeometryMapping().size());
-//		LOGGER.info("Byte size " + geometryBuffer.getPreparedByteSize());
 		int vertexPosition = 0;
 		serializerDataOutputStream.writeByte(mode == Mode.PREPARED_BUFFER_TRANSPARENT ? 7 : 8);
 		ByteBuffer buffer = ByteBuffer.allocate(geometryBuffer.getPreparedByteSize()).order(ByteOrder.LITTLE_ENDIAN);
 		Map<HashMapVirtualObject, HashMapVirtualObject> geometryMapping = geometryBuffer.getGeometryMapping();
 
-		if (geometryMapping.size() != geometryBuffer.getNrObjects()) {
-			System.out.println(geometryMapping.size() + ", " + geometryBuffer.getNrObjects());
-		}
 		buffer.putInt(geometryBuffer.getNrObjects());
 		buffer.putInt(geometryBuffer.getNrIndices());
 		buffer.putInt(geometryBuffer.getNrVertices());
@@ -376,11 +370,11 @@ public class BinaryGeometryMessagingStreamingSerializer implements MessagingStre
 				// Apply quantization matrix
 				Matrix.multiplyMV(result, 0, vertexQuantizationMatrix, 0, vertex, 0);
 				
-				for (int a=0; a<3; a++) {
-					if (result[a] < Short.MIN_VALUE || result[a] > Short.MAX_VALUE) {
-						System.out.println("err " + result[a]);
-					}
-				}
+//				for (int a=0; a<3; a++) {
+//					if (result[a] < Short.MIN_VALUE || result[a] > Short.MAX_VALUE) {
+//						System.out.println("err " + result[a]);
+//					}
+//				}
 				
 				buffer.putShort(verticesStartByte, (short)result[0]);
 				buffer.putShort(verticesStartByte + 2, (short)result[1]);
@@ -416,9 +410,6 @@ public class BinaryGeometryMessagingStreamingSerializer implements MessagingStre
 
 				normalsStartByte += 3;
 			}
-			
-//			buffer.position(colorsStartByte);
-//			buffer.put(colorPackData);
 		}
 		serializerDataOutputStream.write(buffer.array());
 		serializerDataOutputStream.align8();
