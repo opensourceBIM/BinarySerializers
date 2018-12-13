@@ -106,6 +106,7 @@ public class BinaryGeometryMessagingStreamingSerializer implements MessagingStre
 		GEOMETRY_TRIANGLES_PARTED((byte)3),
 		GEOMETRY_TRIANGLES((byte)1),
 		GEOMETRY_INFO((byte)5),
+		MINIMAL_GEOMETRY_INFO((byte)9),
 		PREPARED_BUFFER_TRANSPARENT((byte)7),
 		PREPARED_BUFFER_OPAQUE((byte)8),
 		END((byte)6);
@@ -299,6 +300,8 @@ public class BinaryGeometryMessagingStreamingSerializer implements MessagingStre
 		
 		for (HashMapVirtualObject info : geometryMapping.keySet()) {
 			HashMapVirtualObject data = geometryMapping.get(info);
+//			short cid = (short) data.get("type");
+//			EClass eClass = objectProvider.getEClassForCid(cid);
 
 			DoubleBuffer transformation = ByteBuffer.wrap((byte[]) info.eGet(info.eClass().getEStructuralFeature("transformation"))).order(ByteOrder.LITTLE_ENDIAN).asDoubleBuffer();
 			double[] ms = new double[16];
@@ -375,7 +378,7 @@ public class BinaryGeometryMessagingStreamingSerializer implements MessagingStre
 				
 				for (int a=0; a<3; a++) {
 					if (result[a] < Short.MIN_VALUE || result[a] > Short.MAX_VALUE) {
-//						System.out.println("err " + result[a]);
+						System.out.println("err " + result[a]);
 					}
 				}
 				
@@ -513,8 +516,7 @@ public class BinaryGeometryMessagingStreamingSerializer implements MessagingStre
 	}
 
 	private void writeGeometryInfo(HashMapVirtualObject info) throws IOException, SerializerException {
-		EStructuralFeature hasTransparencyFeature = info.eClass().getEStructuralFeature("hasTransparency");
-		boolean hasTransparancy = (boolean)info.eGet(hasTransparencyFeature);
+		boolean hasTransparancy = (boolean)info.eGet(GeometryPackage.eINSTANCE.getGeometryInfo_HasTransparency());
 		long geometryDataId = (long)info.eGet(info.eClass().getEStructuralFeature("data"));
 		boolean inPreparedBuffer = false;
 		long oid = (long) info.eGet(GeometryPackage.eINSTANCE.getGeometryInfo_IfcProductOid());
@@ -529,6 +531,8 @@ public class BinaryGeometryMessagingStreamingSerializer implements MessagingStre
 			} else {
 				dataToGeometryInfo.put(geometryDataId, info);
 			}
+			writeMinimalGeometryInfo(info);
+			return;
 		}
 		
 		byte[] transformation = (byte[]) info.eGet(info.eClass().getEStructuralFeature("transformation"));
@@ -550,9 +554,35 @@ public class BinaryGeometryMessagingStreamingSerializer implements MessagingStre
 		serializerDataOutputStream.writeLongUnchecked(info.getRoid());
 		serializerDataOutputStream.writeLongUnchecked(info.getOid());
 		serializerDataOutputStream.writeLongUnchecked(hasTransparancy ? 1 : 0);
-		HashMapWrappedVirtualObject bounds = (HashMapWrappedVirtualObject) info.eGet(info.eClass().getEStructuralFeature("bounds"));
-		HashMapWrappedVirtualObject minBounds = (HashMapWrappedVirtualObject) bounds.eGet(bounds.eClass().getEStructuralFeature("min"));
-		HashMapWrappedVirtualObject maxBounds = (HashMapWrappedVirtualObject) bounds.eGet(bounds.eClass().getEStructuralFeature("max"));
+		writeBounds(info);
+		
+		lastTransformation = ByteBuffer.wrap(transformation);
+		lastTransformation.order(ByteOrder.LITTLE_ENDIAN);
+		DoubleBuffer asDoubleBuffer = lastTransformation.asDoubleBuffer();
+		double[] ms = new double[16];
+		for (int i=0; i<16; i++) {
+			ms[i] = asDoubleBuffer.get();
+		}
+//		if (!Matrix.invertM(inverse , 0, ms, 0)) {
+//			System.out.println("NO INVERSE!");
+//		}
+		
+		serializerDataOutputStream.ensureExtraCapacity(((byte[])transformation).length + 8);
+		serializerDataOutputStream.write(transformation);
+		serializerDataOutputStream.writeLong(dataOid);
+		
+		nrObjectsWritten++;
+		if (reportProgress) {
+			if (progressReporter != null) {
+				progressReporter.update(nrObjectsWritten, size);
+			}
+		}
+	}
+
+	private void writeBounds(HashMapVirtualObject info) throws IOException {
+		HashMapWrappedVirtualObject bounds = (HashMapWrappedVirtualObject) info.eGet(GeometryPackage.eINSTANCE.getGeometryInfo_Bounds());
+		HashMapWrappedVirtualObject minBounds = (HashMapWrappedVirtualObject) bounds.eGet(GeometryPackage.eINSTANCE.getBounds_Min());
+		HashMapWrappedVirtualObject maxBounds = (HashMapWrappedVirtualObject) bounds.eGet(GeometryPackage.eINSTANCE.getBounds_Max());
 		Double minX = (Double) minBounds.eGet("x");
 		Double minY = (Double) minBounds.eGet("y");
 		Double minZ = (Double) minBounds.eGet("z");
@@ -569,34 +599,46 @@ public class BinaryGeometryMessagingStreamingSerializer implements MessagingStre
 			maxZ = maxZ * projectInfo.getMultiplierToMm();
 		}
 		
-		serializerDataOutputStream.ensureExtraCapacity(8 * 6 + ((byte[])transformation).length + 8);
+		serializerDataOutputStream.ensureExtraCapacity(8 * 6);
 		serializerDataOutputStream.writeDoubleUnchecked(minX);
 		serializerDataOutputStream.writeDoubleUnchecked(minY);
 		serializerDataOutputStream.writeDoubleUnchecked(minZ);
 		serializerDataOutputStream.writeDoubleUnchecked(maxX);
 		serializerDataOutputStream.writeDoubleUnchecked(maxY);
 		serializerDataOutputStream.writeDoubleUnchecked(maxZ);
-		lastTransformation = ByteBuffer.wrap(transformation);
-		lastTransformation.order(ByteOrder.LITTLE_ENDIAN);
-		DoubleBuffer asDoubleBuffer = lastTransformation.asDoubleBuffer();
-		double[] ms = new double[16];
-		for (int i=0; i<16; i++) {
-			ms[i] = asDoubleBuffer.get();
+	}
+
+	private void writeMinimalGeometryInfo(HashMapVirtualObject info) throws IOException {
+		boolean hasTransparancy = (boolean)info.eGet(GeometryPackage.eINSTANCE.getGeometryInfo_HasTransparency());
+		long geometryDataId = (long)info.eGet(GeometryPackage.eINSTANCE.getGeometryInfo_Data());
+		long oid = (long) info.eGet(GeometryPackage.eINSTANCE.getGeometryInfo_IfcProductOid());
+		
+		serializerDataOutputStream.writeByte(MessageType.MINIMAL_GEOMETRY_INFO.getId());
+		serializerDataOutputStream.writeLong(oid);
+		String type = objectProvider.getEClassForOid(oid).getName();
+		serializerDataOutputStream.writeUTF(type);
+		int nrColors = (int)info.eGet(GeometryPackage.eINSTANCE.getGeometryInfo_NrColors());
+		if (nrColors == 0) {
+			int nrVertices = (int)info.eGet(GeometryPackage.eINSTANCE.getGeometryInfo_NrVertices());
+			nrColors = nrVertices / 3 * 4;
 		}
-//		if (!Matrix.invertM(inverse , 0, ms, 0)) {
-//			System.out.println("NO INVERSE!");
-//		}
+		serializerDataOutputStream.writeInt(nrColors);
+		serializerDataOutputStream.ensureExtraCapacity(32);
+		serializerDataOutputStream.writeLongUnchecked(info.getRoid());
+		serializerDataOutputStream.writeLongUnchecked(info.getOid());
+		serializerDataOutputStream.writeLongUnchecked(hasTransparancy ? 1 : 0);
+		serializerDataOutputStream.align8();
 		
-		serializerDataOutputStream.write(transformation);
+		writeBounds(info);
 		
-		serializerDataOutputStream.writeLong(dataOid);
+		serializerDataOutputStream.writeLong(geometryDataId);
 		
 		nrObjectsWritten++;
 		if (reportProgress) {
 			if (progressReporter != null) {
 				progressReporter.update(nrObjectsWritten, size);
 			}
-		}
+		}		
 	}
 
 	private boolean writeGeometryData(HashMapVirtualObject data, long oid) throws IOException, SerializerException {
