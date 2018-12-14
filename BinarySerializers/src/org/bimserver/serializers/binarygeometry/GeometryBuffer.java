@@ -1,90 +1,103 @@
 package org.bimserver.serializers.binarygeometry;
 
-import java.util.LinkedHashMap;
-import java.util.Map;
-
-import org.bimserver.shared.HashMapVirtualObject;
+import java.util.ArrayList;
+import java.util.List;
 
 public class GeometryBuffer {
-	private final Map<HashMapVirtualObject, HashMapVirtualObject> geometryMapping = new LinkedHashMap<>();
+	private static final int THRESHOLD = 100000;
 
-	private int preparedByteSize = 20;
+	private final List<GeometrySubBuffer> geometryMappings = new ArrayList<>();
+	private int currentIndex;
+
+	private boolean initSent;
+
 	private int nrIndices;
+
 	private int nrVertices;
+
 	private int nrColors;
+
+	private int preparedByteSize;
+
 	private int nrObjects;
 
-	private int totalColorPackSize;
+	public GeometryBuffer() {
+		GeometrySubBuffer current = new GeometrySubBuffer(this, 0);
+		geometryMappings.add(current);
+	}
+	
+	public List<GeometrySubBuffer> getGeometryMappings() {
+		return geometryMappings;
+	}
+
+	public boolean isEmpty() {
+		return geometryMappings.isEmpty();
+	}
+
+	public GeometrySubBuffer getCurrentGeometryMapping(boolean canUpdate) {
+		GeometrySubBuffer current = geometryMappings.get(geometryMappings.size() - 1);
+		if (current.getNrTriangles() > THRESHOLD && canUpdate) {
+			current = new GeometrySubBuffer(this, current.getBaseIndex() + current.getNrVertices() / 3);
+			geometryMappings.add(current);
+		}
+		return current;
+	}
+
+	public boolean hasNextGeometryMapping() {
+		return currentIndex < geometryMappings.size();
+	}
+	
+	public GeometrySubBuffer getNextGeometryMapping() {
+		GeometrySubBuffer geometrySubBuffer = geometryMappings.get(currentIndex);
+		currentIndex++;
+		return geometrySubBuffer;
+	}
+
+	public void setInitSent() {
+		this.initSent = true;
+	}
+	
+	public boolean initSent() {
+		return initSent;
+	}
 
 	public int getPreparedByteSize() {
 		return preparedByteSize;
 	}
 
-	public void setPreparedByteSize(int preparedByteSize) {
-		this.preparedByteSize = preparedByteSize;
+	public int getNrObjects() {
+		return nrObjects;
 	}
 
 	public int getNrIndices() {
 		return nrIndices;
 	}
 
-	public void setNrIndices(int nrIndices) {
-		this.nrIndices = nrIndices;
-	}
-
 	public int getNrVertices() {
 		return nrVertices;
-	}
-
-	public void setNrVertices(int nrVertices) {
-		this.nrVertices = nrVertices;
 	}
 
 	public int getNrColors() {
 		return nrColors;
 	}
 
-	public void setNrColors(int nrColors) {
-		this.nrColors = nrColors;
+	public void incNrIndices(int nrIndices) {
+		this.nrIndices += nrIndices;
 	}
 
-	public void incNrIndices(int nrIndices2) {
-		this.nrIndices += nrIndices2;
+	public void incNrVertices(int nrVertices) {
+		this.nrVertices += nrVertices;
 	}
 
-	public void incNrVertices(int nrVertices2) {
-		this.nrVertices += nrVertices2;
+	public void incNrColors(int nrColors) {
+		this.nrColors += nrColors;
 	}
 
-	public void incNrColors(int i) {
-		this.nrColors += i;
-	}
-
-	public void incPreparedSize(int i) {
-		this.preparedByteSize += i;
-	}
-	
-	public Map<HashMapVirtualObject, HashMapVirtualObject> getGeometryMapping() {
-		return geometryMapping;
+	public void incPreparedByteSize(int byteSize) {
+		this.preparedByteSize += byteSize;
 	}
 
 	public void incNrObjects() {
 		this.nrObjects++;
-	}
-	
-	public int getNrObjects() {
-		return nrObjects;
-	}
-
-	public boolean isEmpty() {
-		return geometryMapping.isEmpty();
-	}
-
-	public void incTotalColorPackSize(int bytes) {
-		this.totalColorPackSize += bytes;
-	}
-	
-	public int getTotalColorPackSize() {
-		return totalColorPackSize;
 	}
 }

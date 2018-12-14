@@ -96,6 +96,7 @@ public class BinaryGeometryMessagingStreamingSerializer implements MessagingStre
 		LOAD,
 		START,
 		DATA,
+		PREPARED_BUFFER_INIT,
 		PREPARED_BUFFER_TRANSPARENT,
 		PREPARED_BUFFER_OPAQUE,
 		END
@@ -109,6 +110,8 @@ public class BinaryGeometryMessagingStreamingSerializer implements MessagingStre
 		MINIMAL_GEOMETRY_INFO((byte)9),
 		PREPARED_BUFFER_TRANSPARENT((byte)7),
 		PREPARED_BUFFER_OPAQUE((byte)8),
+		PREPARED_BUFFER_TRANSPARENT_INIT((byte)10),
+		PREPARED_BUFFER_OPAQUE_INIT((byte)11),
 		END((byte)6);
 		
 		private byte id;
@@ -246,7 +249,7 @@ public class BinaryGeometryMessagingStreamingSerializer implements MessagingStre
 			if (!writeData()) {
 				serializerDataOutputStream.align8();
 				if (prepareBuffers) {
-					mode = Mode.PREPARED_BUFFER_TRANSPARENT;
+					mode = Mode.PREPARED_BUFFER_OPAQUE;
 				} else {
 					mode = Mode.END;
 				}
@@ -254,13 +257,15 @@ public class BinaryGeometryMessagingStreamingSerializer implements MessagingStre
 			}
 			serializerDataOutputStream.align8();
 			break;
-		case PREPARED_BUFFER_TRANSPARENT:
-			writePreparedBuffer(mode);
-			mode = Mode.PREPARED_BUFFER_OPAQUE;
-			break;
 		case PREPARED_BUFFER_OPAQUE:
-			writePreparedBuffer(mode);
-			mode = Mode.END;
+			if (!writePreparedBuffer(mode)) {
+				mode = Mode.PREPARED_BUFFER_TRANSPARENT;
+			}
+			break;
+		case PREPARED_BUFFER_TRANSPARENT:
+			if (!writePreparedBuffer(mode)) {
+				mode = Mode.END;
+			}
 			break;
 		case END:
 			writeEnd();
@@ -272,147 +277,171 @@ public class BinaryGeometryMessagingStreamingSerializer implements MessagingStre
 		return true;
 	}
 
-	private void writePreparedBuffer(Mode mode) throws IOException, SerializerException {
-		GeometryBuffer geometryBuffer = getCurrentBuffer();
-		if (geometryBuffer.isEmpty()) {
-			return;
-		}
-		int vertexPosition = 0;
-		serializerDataOutputStream.writeByte(mode == Mode.PREPARED_BUFFER_TRANSPARENT ? 7 : 8);
-		ByteBuffer buffer = ByteBuffer.allocate(geometryBuffer.getPreparedByteSize()).order(ByteOrder.LITTLE_ENDIAN);
-		Map<HashMapVirtualObject, HashMapVirtualObject> geometryMapping = geometryBuffer.getGeometryMapping();
-
-		buffer.putInt(geometryBuffer.getNrObjects());
-		buffer.putInt(geometryBuffer.getNrIndices());
-		buffer.putInt(geometryBuffer.getNrVertices());
-		buffer.putInt(geometryBuffer.getNrVertices());
-		buffer.putInt(geometryBuffer.getNrColors());
-		int indicesStartByte = 20;
-		int indicesMappingStartByte = indicesStartByte + geometryBuffer.getNrIndices() * 4;
-		int verticesStartByte = indicesMappingStartByte + geometryBuffer.getNrObjects() * 24 + geometryBuffer.getTotalColorPackSize();
-		int normalsStartByte = verticesStartByte + geometryBuffer.getNrVertices() * 2;
-		
-		for (HashMapVirtualObject info : geometryMapping.keySet()) {
-			HashMapVirtualObject data = geometryMapping.get(info);
-//			short cid = (short) data.get("type");
-//			EClass eClass = objectProvider.getEClassForCid(cid);
-
-			DoubleBuffer transformation = ByteBuffer.wrap((byte[]) info.eGet(info.eClass().getEStructuralFeature("transformation"))).order(ByteOrder.LITTLE_ENDIAN).asDoubleBuffer();
-			double[] ms = new double[16];
-			for (int i=0; i<16; i++) {
-				ms[i] = transformation.get();
+	private boolean writePreparedBuffer(Mode mode) throws IOException, SerializerException {
+		try {
+			GeometryBuffer geometryBuffer = getCurrentBuffer();
+			if (geometryBuffer.isEmpty() || !geometryBuffer.hasNextGeometryMapping()) {
+				return false;
 			}
-			
-			AbstractHashMapVirtualObject indicesBuffer = data.getDirectFeature(GeometryPackage.eINSTANCE.getGeometryData_Indices());
-			byte[] normals = null;
-			byte[] vertices = null;
-			AbstractHashMapVirtualObject normalsBuffer = data.getDirectFeature(GeometryPackage.eINSTANCE.getGeometryData_Normals());
-			normals = (byte[]) normalsBuffer.get("data");
-			AbstractHashMapVirtualObject verticesBuffer = data.getDirectFeature(GeometryPackage.eINSTANCE.getGeometryData_Vertices());
-			vertices = (byte[]) verticesBuffer.get("data");
-			IntBuffer indices = ByteBuffer.wrap((byte[]) indicesBuffer.get("data")).order(ByteOrder.LITTLE_ENDIAN).asIntBuffer();
-
-			Long oid = (Long)info.get("ifcProductOid");
-			buffer.putLong(indicesMappingStartByte, oid);
-			indicesMappingStartByte += 8;
-			buffer.putInt(indicesMappingStartByte, (indicesStartByte - 20) / 4);
-			indicesMappingStartByte += 4;
-			buffer.putInt(indicesMappingStartByte, indices.capacity());
-			indicesMappingStartByte += 4;
-			buffer.putInt(indicesMappingStartByte, vertices.length / 4);
-			indicesMappingStartByte += 4;
-			
-			HashMapVirtualObject colorPack = (HashMapVirtualObject) data.getDirectFeature(GeometryPackage.eINSTANCE.getGeometryData_ColorPack());
-			byte[] colorPackData = colorPack == null ? null : (byte[]) colorPack.eGet(GeometryPackage.eINSTANCE.getColorPack_Data());
-			if (colorPackData == null || colorPackData.length == 0) {
-				buffer.putInt(indicesMappingStartByte, 0);
-				indicesMappingStartByte += 4;
-			} else {
-				int colorPackSize = colorPackData.length / 8;
-				buffer.putInt(indicesMappingStartByte, colorPackSize);
-				indicesMappingStartByte += 4;
-				buffer.position(indicesMappingStartByte);
-				buffer.put(colorPackData);
-				indicesMappingStartByte += colorPackData.length;
-			}
-			
-			for (int i=0; i<indices.capacity(); i++) {
-				int index = indices.get();
+			if (!geometryBuffer.initSent()) {
+				ByteBuffer buffer = ByteBuffer.allocate(21).order(ByteOrder.LITTLE_ENDIAN);
+	
+				buffer.put(mode == Mode.PREPARED_BUFFER_OPAQUE ? MessageType.PREPARED_BUFFER_OPAQUE_INIT.getId() : MessageType.PREPARED_BUFFER_TRANSPARENT_INIT.getId());
+				buffer.putInt(geometryBuffer.getNrObjects());
+				buffer.putInt(geometryBuffer.getNrIndices());
+				buffer.putInt(geometryBuffer.getNrVertices());
+				buffer.putInt(geometryBuffer.getNrVertices());
+				buffer.putInt(geometryBuffer.getNrColors());
+	
+				serializerDataOutputStream.write(buffer.array());
+				serializerDataOutputStream.align8();
 				
-				buffer.putInt(indicesStartByte, index + (vertexPosition / 3));
-				indicesStartByte += 4;
-			}
-			
-			ByteBuffer vertexByteBuffer = ByteBuffer.wrap(vertices).order(ByteOrder.LITTLE_ENDIAN);
-			ByteBuffer normalsByteBuffer = ByteBuffer.wrap(normals).order(ByteOrder.LITTLE_ENDIAN);
-			
-			float[] in = new float[4];
-			float[] vertex = new float[4];
-			float[] result = new float[4];
-			in[3] = 1;
-			vertex[3] = 1;
-			int nrPos = vertexByteBuffer.capacity() / 4;
-			for (int i=0; i<nrPos; i+=3) {
-				in[0] = vertexByteBuffer.getFloat();
-				in[1] = vertexByteBuffer.getFloat();
-				in[2] = vertexByteBuffer.getFloat();
-
-				// Apply the transformation matrix of the object
-				Matrix.multiplyMV(vertex, 0, ms, 0, in, 0);
+				geometryBuffer.setInitSent();
 				
-				// Possibly convert to mm
-				if (projectInfo.getMultiplierToMm() != 1f) {
-					vertex[0] = vertex[0] * projectInfo.getMultiplierToMm();
-					vertex[1] = vertex[1] * projectInfo.getMultiplierToMm();
-					vertex[2] = vertex[2] * projectInfo.getMultiplierToMm();
+				return true;
+			}
+			int vertexPosition = 0;
+			serializerDataOutputStream.writeByte(mode == Mode.PREPARED_BUFFER_TRANSPARENT ? 7 : 8);
+			GeometrySubBuffer geometryMapping = geometryBuffer.getNextGeometryMapping();
+			ByteBuffer buffer = ByteBuffer.allocate(geometryMapping.getPreparedByteSize()).order(ByteOrder.LITTLE_ENDIAN);
+	
+			buffer.putInt(geometryMapping.getNrObjects());
+			buffer.putInt(geometryMapping.getNrIndices());
+			buffer.putInt(geometryMapping.getNrVertices());
+			buffer.putInt(geometryMapping.getNrVertices());
+			buffer.putInt(geometryMapping.getNrColors());
+			int indicesStartByte = 20;
+			int indicesMappingStartByte = indicesStartByte + geometryMapping.getNrIndices() * 4;
+			int verticesStartByte = indicesMappingStartByte + geometryMapping.getNrObjects() * 24 + geometryMapping.getTotalColorPackSize();
+			int normalsStartByte = verticesStartByte + geometryMapping.getNrVertices() * 2;
+			
+			int baseIndex = geometryMapping.getBaseIndex();
+			
+			for (HashMapVirtualObject info : geometryMapping.keySet()) {
+				HashMapVirtualObject data = geometryMapping.get(info);
+	//			short cid = (short) data.get("type");
+	//			EClass eClass = objectProvider.getEClassForCid(cid);
+	
+				DoubleBuffer transformation = ByteBuffer.wrap((byte[]) info.eGet(info.eClass().getEStructuralFeature("transformation"))).order(ByteOrder.LITTLE_ENDIAN).asDoubleBuffer();
+				double[] ms = new double[16];
+				for (int i=0; i<16; i++) {
+					ms[i] = transformation.get();
 				}
-
-				// Apply quantization matrix
-				Matrix.multiplyMV(result, 0, vertexQuantizationMatrix, 0, vertex, 0);
 				
-//				for (int a=0; a<3; a++) {
-//					if (result[a] < Short.MIN_VALUE || result[a] > Short.MAX_VALUE) {
-//						System.out.println("err " + result[a]);
-//					}
-//				}
+				AbstractHashMapVirtualObject indicesBuffer = data.getDirectFeature(GeometryPackage.eINSTANCE.getGeometryData_Indices());
+				byte[] normals = null;
+				byte[] vertices = null;
+				AbstractHashMapVirtualObject normalsBuffer = data.getDirectFeature(GeometryPackage.eINSTANCE.getGeometryData_Normals());
+				normals = (byte[]) normalsBuffer.get("data");
+				AbstractHashMapVirtualObject verticesBuffer = data.getDirectFeature(GeometryPackage.eINSTANCE.getGeometryData_Vertices());
+				vertices = (byte[]) verticesBuffer.get("data");
+				IntBuffer indices = ByteBuffer.wrap((byte[]) indicesBuffer.get("data")).order(ByteOrder.LITTLE_ENDIAN).asIntBuffer();
+	
+				Long oid = (Long)info.get("ifcProductOid");
+				buffer.putLong(indicesMappingStartByte, oid);
+				indicesMappingStartByte += 8;
+				buffer.putInt(indicesMappingStartByte, (indicesStartByte - 20) / 4);
+				indicesMappingStartByte += 4;
+				buffer.putInt(indicesMappingStartByte, indices.capacity());
+				indicesMappingStartByte += 4;
+				buffer.putInt(indicesMappingStartByte, vertices.length / 4);
+				indicesMappingStartByte += 4;
 				
-				buffer.putShort(verticesStartByte, (short)result[0]);
-				buffer.putShort(verticesStartByte + 2, (short)result[1]);
-				buffer.putShort(verticesStartByte + 4, (short)result[2]);
-
-				verticesStartByte += 6;
+				HashMapVirtualObject colorPack = (HashMapVirtualObject) data.getDirectFeature(GeometryPackage.eINSTANCE.getGeometryData_ColorPack());
+				byte[] colorPackData = colorPack == null ? null : (byte[]) colorPack.eGet(GeometryPackage.eINSTANCE.getColorPack_Data());
+				if (colorPackData == null || colorPackData.length == 0) {
+					buffer.putInt(indicesMappingStartByte, 0);
+					indicesMappingStartByte += 4;
+				} else {
+					int colorPackSize = colorPackData.length / 8;
+					buffer.putInt(indicesMappingStartByte, colorPackSize);
+					indicesMappingStartByte += 4;
+					buffer.position(indicesMappingStartByte);
+					buffer.put(colorPackData);
+					indicesMappingStartByte += colorPackData.length;
+				}
+				
+				for (int i=0; i<indices.capacity(); i++) {
+					int index = indices.get();
+					
+					buffer.putInt(indicesStartByte, baseIndex + index + (vertexPosition / 3));
+					indicesStartByte += 4;
+				}
+				
+				ByteBuffer vertexByteBuffer = ByteBuffer.wrap(vertices).order(ByteOrder.LITTLE_ENDIAN);
+				ByteBuffer normalsByteBuffer = ByteBuffer.wrap(normals).order(ByteOrder.LITTLE_ENDIAN);
+				
+				float[] in = new float[4];
+				float[] vertex = new float[4];
+				float[] result = new float[4];
+				in[3] = 1;
+				vertex[3] = 1;
+				int nrPos = vertexByteBuffer.capacity() / 4;
+				for (int i=0; i<nrPos; i+=3) {
+					in[0] = vertexByteBuffer.getFloat();
+					in[1] = vertexByteBuffer.getFloat();
+					in[2] = vertexByteBuffer.getFloat();
+	
+					// Apply the transformation matrix of the object
+					Matrix.multiplyMV(vertex, 0, ms, 0, in, 0);
+					
+					// Possibly convert to mm
+					if (projectInfo.getMultiplierToMm() != 1f) {
+						vertex[0] = vertex[0] * projectInfo.getMultiplierToMm();
+						vertex[1] = vertex[1] * projectInfo.getMultiplierToMm();
+						vertex[2] = vertex[2] * projectInfo.getMultiplierToMm();
+					}
+	
+					// Apply quantization matrix
+					Matrix.multiplyMV(result, 0, vertexQuantizationMatrix, 0, vertex, 0);
+					
+	//				for (int a=0; a<3; a++) {
+	//					if (result[a] < Short.MIN_VALUE || result[a] > Short.MAX_VALUE) {
+	//						System.out.println("err " + result[a]);
+	//					}
+	//				}
+					
+					buffer.putShort(verticesStartByte, (short)result[0]);
+					buffer.putShort(verticesStartByte + 2, (short)result[1]);
+					buffer.putShort(verticesStartByte + 4, (short)result[2]);
+	
+					verticesStartByte += 6;
+				}
+				
+				vertexPosition += nrPos;
+				
+				double[] inverted = new double[9];
+				double[] transposed = new double[9];
+				double[] mat3 = new double[9];
+				Matrix3.fromMat4(mat3, ms);
+				Matrix3.invert(inverted, mat3);
+				Matrix3.transpose(transposed, inverted);
+				float[] normalIn = new float[3];
+				float[] normal = new float[3];
+	
+				// No transformation required for the normals, because tiling only translates, not true, we need to apply the inverse transpose
+				for (int i=0; i<nrPos; i+=3) {
+					normalIn[0] = normalsByteBuffer.getFloat();
+					normalIn[1] = normalsByteBuffer.getFloat();
+					normalIn[2] = normalsByteBuffer.getFloat();
+	
+					// Apply the transformation matrix of the object
+					Matrix3.multiplyMV(normal, normalIn, transposed);
+					Vector3.normalize(normal, normal);
+					
+					buffer.put(normalsStartByte, (byte)(normal[0] * 127f));
+					buffer.put(normalsStartByte + 1, (byte)(normal[1] * 127f));
+					buffer.put(normalsStartByte + 2, (byte)(normal[2] * 127f));
+	
+					normalsStartByte += 3;
+				}
 			}
-			
-			vertexPosition += nrPos;
-			
-			double[] inverted = new double[9];
-			double[] transposed = new double[9];
-			double[] mat3 = new double[9];
-			Matrix3.fromMat4(mat3, ms);
-			Matrix3.invert(inverted, mat3);
-			Matrix3.transpose(transposed, inverted);
-			float[] normalIn = new float[3];
-			float[] normal = new float[3];
-
-			// No transformation required for the normals, because tiling only translates, not true, we need to apply the inverse transpose
-			for (int i=0; i<nrPos; i+=3) {
-				normalIn[0] = normalsByteBuffer.getFloat();
-				normalIn[1] = normalsByteBuffer.getFloat();
-				normalIn[2] = normalsByteBuffer.getFloat();
-
-				// Apply the transformation matrix of the object
-				Matrix3.multiplyMV(normal, normalIn, transposed);
-				Vector3.normalize(normal, normal);
-				
-				buffer.put(normalsStartByte, (byte)(normal[0] * 127f));
-				buffer.put(normalsStartByte + 1, (byte)(normal[1] * 127f));
-				buffer.put(normalsStartByte + 2, (byte)(normal[2] * 127f));
-
-				normalsStartByte += 3;
-			}
+			serializerDataOutputStream.write(buffer.array());
+			serializerDataOutputStream.align8();
+			return geometryBuffer.hasNextGeometryMapping();
+		} catch (IndexOutOfBoundsException e) {
+			throw e;
 		}
-		serializerDataOutputStream.write(buffer.array());
-		serializerDataOutputStream.align8();
 	}
 
 	private void load() throws SerializerException {
@@ -515,7 +544,7 @@ public class BinaryGeometryMessagingStreamingSerializer implements MessagingStre
 			inPreparedBuffer = true;
 			if (oidToGeometryData.containsKey(geometryDataId)) {
 				GeometryBuffer currentBuffer = getCurrentBuffer(hasTransparancy);
-				Map<HashMapVirtualObject, HashMapVirtualObject> geometryMapping = currentBuffer.getGeometryMapping();
+				GeometrySubBuffer geometryMapping = currentBuffer.getCurrentGeometryMapping(true);
 				HashMapVirtualObject gd = oidToGeometryData.get(geometryDataId);
 				geometryMapping.put(info, gd);
 				updateSize(gd, currentBuffer);
@@ -642,7 +671,7 @@ public class BinaryGeometryMessagingStreamingSerializer implements MessagingStre
 			oidToGeometryData.put(oid, data);
 			if (dataToGeometryInfo.containsKey(oid)) {
 				GeometryBuffer currentBuffer = getCurrentBuffer(hasTransparancy);
-				Map<HashMapVirtualObject, HashMapVirtualObject> geometryMapping = currentBuffer.getGeometryMapping();
+				GeometrySubBuffer geometryMapping = currentBuffer.getCurrentGeometryMapping(true);
 				geometryMapping.put(dataToGeometryInfo.get(oid), data);
 				updateSize(data, currentBuffer);
 			}
@@ -994,13 +1023,15 @@ public class BinaryGeometryMessagingStreamingSerializer implements MessagingStre
 		HashMapVirtualObject colorPack = (HashMapVirtualObject) data.getDirectFeature(GeometryPackage.eINSTANCE.getGeometryData_ColorPack());
 		byte[] colorPackData = colorPack == null ? null : (byte[]) colorPack.eGet(GeometryPackage.eINSTANCE.getColorPack_Data());
 		
-		geometryBuffer.incNrIndices(nrIndices);
-		geometryBuffer.incNrVertices(nrVertices);
-		geometryBuffer.incNrColors(colorPackData == null ? 0 : colorPackData.length);
-		geometryBuffer.incTotalColorPackSize(colorPackData == null ? 0 : colorPackData.length);
-		geometryBuffer.incNrObjects();
+		GeometrySubBuffer currentGeometryMapping = geometryBuffer.getCurrentGeometryMapping(false);
 		
-		geometryBuffer.incPreparedSize( 
+		currentGeometryMapping.incNrIndices(nrIndices);
+		currentGeometryMapping.incNrVertices(nrVertices);
+		currentGeometryMapping.incNrColors(colorPackData == null ? 0 : colorPackData.length);
+		currentGeometryMapping.incTotalColorPackSize(colorPackData == null ? 0 : colorPackData.length);
+		currentGeometryMapping.incNrObjects();
+		
+		currentGeometryMapping.incPreparedSize( 
 			nrIndices * 4 + // Each index number uses 4 bytes
 			nrVertices * 2 + // Each vertex uses 2 bytes (quantized) per number
 			nrVertices * 1 + // Each vertex uses 1 byte per number for (quantized) normals
