@@ -312,7 +312,7 @@ public class BinaryGeometryMessagingStreamingSerializer implements MessagingStre
 			buffer.putInt(geometryMapping.getNrColors());
 			int indicesStartByte = 20;
 			int indicesMappingStartByte = indicesStartByte + geometryMapping.getNrIndices() * 4;
-			int verticesStartByte = indicesMappingStartByte + geometryMapping.getNrObjects() * 24 + geometryMapping.getTotalColorPackSize();
+			int verticesStartByte = indicesMappingStartByte + geometryMapping.getNrObjects() * 28 + geometryMapping.getTotalColorPackSize();
 			int normalsStartByte = verticesStartByte + geometryMapping.getNrVertices() * 2;
 			
 			int baseIndex = geometryMapping.getBaseIndex();
@@ -338,6 +338,7 @@ public class BinaryGeometryMessagingStreamingSerializer implements MessagingStre
 				IntBuffer indices = ByteBuffer.wrap((byte[]) indicesBuffer.get("data")).order(ByteOrder.LITTLE_ENDIAN).asIntBuffer();
 	
 				Long oid = (Long)info.get("ifcProductOid");
+//				EClass eClass = objectProvider.getEClassForOid(oid);
 				buffer.putLong(indicesMappingStartByte, oid);
 				indicesMappingStartByte += 8;
 				buffer.putInt(indicesMappingStartByte, (indicesStartByte - 20) / 4);
@@ -345,6 +346,10 @@ public class BinaryGeometryMessagingStreamingSerializer implements MessagingStre
 				buffer.putInt(indicesMappingStartByte, indices.capacity());
 				indicesMappingStartByte += 4;
 				buffer.putInt(indicesMappingStartByte, vertices.length / 4);
+				indicesMappingStartByte += 4;
+				
+				float density = (float) info.get("density");
+				buffer.putFloat(indicesMappingStartByte, density);
 				indicesMappingStartByte += 4;
 				
 				HashMapVirtualObject colorPack = (HashMapVirtualObject) data.getDirectFeature(GeometryPackage.eINSTANCE.getGeometryData_ColorPack());
@@ -419,7 +424,7 @@ public class BinaryGeometryMessagingStreamingSerializer implements MessagingStre
 				float[] normalIn = new float[3];
 				float[] normal = new float[3];
 	
-				// No transformation required for the normals, because tiling only translates, not true, we need to apply the inverse transpose
+				// We need to apply the inverse transpose
 				for (int i=0; i<nrPos; i+=3) {
 					normalIn[0] = normalsByteBuffer.getFloat();
 					normalIn[1] = normalsByteBuffer.getFloat();
@@ -1035,6 +1040,7 @@ public class BinaryGeometryMessagingStreamingSerializer implements MessagingStre
 			nrIndices * 4 + // Each index number uses 4 bytes
 			nrVertices * 2 + // Each vertex uses 2 bytes (quantized) per number
 			nrVertices * 1 + // Each vertex uses 1 byte per number for (quantized) normals
+			4 + // Density
 			(colorPackData == null ? 0 : colorPackData.length) + //
 			24); // 8 for the oid, 4 for the startIndex, 4 for the nrIndices
 	}
