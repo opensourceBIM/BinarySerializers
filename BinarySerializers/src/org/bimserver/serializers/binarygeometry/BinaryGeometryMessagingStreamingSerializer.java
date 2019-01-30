@@ -141,7 +141,7 @@ public class BinaryGeometryMessagingStreamingSerializer implements MessagingStre
 	
 	private final Map<Long, HashMapVirtualObject> oidToGeometryData = new HashMap<>();
 	private final Map<Long, HashMapVirtualObject> dataToGeometryInfo = new HashMap<>();
-	private float[] vertexQuantizationMatrix;
+	private double[] vertexQuantizationMatrix;
 	
 	private Mode mode = Mode.LOAD;
 	private long splitCounter = 0;
@@ -192,10 +192,10 @@ public class BinaryGeometryMessagingStreamingSerializer implements MessagingStre
 				if (queryNode.has("loaderSettings")) {
 					ArrayNode vqmNode = (ArrayNode) geometrySettings.get("vertexQuantizationMatrix");
 					if (vqmNode != null) {
-						vertexQuantizationMatrix = new float[16];
+						vertexQuantizationMatrix = new double[16];
 						int i=0;
 						for (JsonNode v : vqmNode) {
-							vertexQuantizationMatrix[i++] = v.floatValue();
+							vertexQuantizationMatrix[i++] = v.doubleValue();
 						}
 //						Matrix.dump(vertexQuantizationMatrix);
 					}
@@ -345,7 +345,7 @@ public class BinaryGeometryMessagingStreamingSerializer implements MessagingStre
 				indicesMappingStartByte += 4;
 				buffer.putInt(indicesMappingStartByte, indices.capacity());
 				indicesMappingStartByte += 4;
-				buffer.putInt(indicesMappingStartByte, vertices.length / 4);
+				buffer.putInt(indicesMappingStartByte, vertices.length / 8);
 				indicesMappingStartByte += 4;
 				
 				float density = (float) info.get("density");
@@ -376,16 +376,16 @@ public class BinaryGeometryMessagingStreamingSerializer implements MessagingStre
 				ByteBuffer vertexByteBuffer = ByteBuffer.wrap(vertices).order(ByteOrder.LITTLE_ENDIAN);
 				ByteBuffer normalsByteBuffer = ByteBuffer.wrap(normals).order(ByteOrder.LITTLE_ENDIAN);
 				
-				float[] in = new float[4];
-				float[] vertex = new float[4];
-				float[] result = new float[4];
+				double[] in = new double[4];
+				double[] vertex = new double[4];
+				double[] result = new double[4];
 				in[3] = 1;
 				vertex[3] = 1;
-				int nrPos = vertexByteBuffer.capacity() / 4;
+				int nrPos = vertexByteBuffer.capacity() / 8;
 				for (int i=0; i<nrPos; i+=3) {
-					in[0] = vertexByteBuffer.getFloat();
-					in[1] = vertexByteBuffer.getFloat();
-					in[2] = vertexByteBuffer.getFloat();
+					in[0] = vertexByteBuffer.getDouble();
+					in[1] = vertexByteBuffer.getDouble();
+					in[2] = vertexByteBuffer.getDouble();
 	
 					// Apply the transformation matrix of the object
 					Matrix.multiplyMV(vertex, 0, ms, 0, in, 0);
@@ -747,7 +747,7 @@ public class BinaryGeometryMessagingStreamingSerializer implements MessagingStre
 
 			ByteBuffer vertexBuffer = ByteBuffer.wrap(vertices);
 			vertexBuffer.order(ByteOrder.LITTLE_ENDIAN);
-			FloatBuffer verticesFloatBuffer = vertexBuffer.asFloatBuffer();
+			DoubleBuffer verticesDoubleBuffer = vertexBuffer.asDoubleBuffer();
 			
 			ByteBuffer normalsBuffer = ByteBuffer.wrap(normals);
 			normalsBuffer.order(ByteOrder.LITTLE_ENDIAN);
@@ -788,15 +788,15 @@ public class BinaryGeometryMessagingStreamingSerializer implements MessagingStre
 					int oldIndex2 = indicesIntBuffer.get(i+1);
 					int oldIndex3 = indicesIntBuffer.get(i+2);
 					
-					serializerDataOutputStream.writeFloatUnchecked(verticesFloatBuffer.get(oldIndex1 * 3));
-					serializerDataOutputStream.writeFloatUnchecked(verticesFloatBuffer.get(oldIndex1 * 3 + 1));
-					serializerDataOutputStream.writeFloatUnchecked(verticesFloatBuffer.get(oldIndex1 * 3 + 2));
-					serializerDataOutputStream.writeFloatUnchecked(verticesFloatBuffer.get(oldIndex2 * 3));
-					serializerDataOutputStream.writeFloatUnchecked(verticesFloatBuffer.get(oldIndex2 * 3 + 1));
-					serializerDataOutputStream.writeFloatUnchecked(verticesFloatBuffer.get(oldIndex2 * 3 + 2));
-					serializerDataOutputStream.writeFloatUnchecked(verticesFloatBuffer.get(oldIndex3 * 3));
-					serializerDataOutputStream.writeFloatUnchecked(verticesFloatBuffer.get(oldIndex3 * 3 + 1));
-					serializerDataOutputStream.writeFloatUnchecked(verticesFloatBuffer.get(oldIndex3 * 3 + 2));
+					serializerDataOutputStream.writeFloatUnchecked((float) verticesDoubleBuffer.get(oldIndex1 * 3));
+					serializerDataOutputStream.writeFloatUnchecked((float) verticesDoubleBuffer.get(oldIndex1 * 3 + 1));
+					serializerDataOutputStream.writeFloatUnchecked((float) verticesDoubleBuffer.get(oldIndex1 * 3 + 2));
+					serializerDataOutputStream.writeFloatUnchecked((float) verticesDoubleBuffer.get(oldIndex2 * 3));
+					serializerDataOutputStream.writeFloatUnchecked((float) verticesDoubleBuffer.get(oldIndex2 * 3 + 1));
+					serializerDataOutputStream.writeFloatUnchecked((float) verticesDoubleBuffer.get(oldIndex2 * 3 + 2));
+					serializerDataOutputStream.writeFloatUnchecked((float) verticesDoubleBuffer.get(oldIndex3 * 3));
+					serializerDataOutputStream.writeFloatUnchecked((float) verticesDoubleBuffer.get(oldIndex3 * 3 + 1));
+					serializerDataOutputStream.writeFloatUnchecked((float) verticesDoubleBuffer.get(oldIndex3 * 3 + 2));
 				}
 				serializerDataOutputStream.writeInt(nrVertices);
 				serializerDataOutputStream.ensureExtraCapacity(12 * (upto - part * maxIndexValues));
@@ -900,27 +900,27 @@ public class BinaryGeometryMessagingStreamingSerializer implements MessagingStre
 					serializerDataOutputStream.align8();
 				} else {
 					ByteBuffer vertexByteBuffer = ByteBuffer.wrap(vertices);
-					int nrPos = vertexByteBuffer.capacity() / 4;
+					int nrPos = vertexByteBuffer.capacity() / 8;
 					serializerDataOutputStream.writeInt(nrPos);
 
 					vertexByteBuffer.order(ByteOrder.LITTLE_ENDIAN);
-					serializerDataOutputStream.ensureExtraCapacity(vertexByteBuffer.capacity() * 6 / 4);
-					float[] vertex = new float[4];
-					float[] result = new float[4];
+					serializerDataOutputStream.ensureExtraCapacity(vertexByteBuffer.capacity() * 6 / 8);
+					double[] vertex = new double[4];
+					double[] result = new double[4];
 					vertex[3] = 1;
 					for (int i=0; i<nrPos; i+=3) {
-						vertex[0] = vertexByteBuffer.getFloat();
-						vertex[1] = vertexByteBuffer.getFloat();
-						vertex[2] = vertexByteBuffer.getFloat();
+						vertex[0] = vertexByteBuffer.getDouble();
+						vertex[1] = vertexByteBuffer.getDouble();
+						vertex[2] = vertexByteBuffer.getDouble();
 						
 						if (normalizeUnitsToMM && projectInfo.getMultiplierToMm() != 1f) {
-							vertex[0] = vertex[0] * projectInfo.getMultiplierToMm();
-							vertex[1] = vertex[1] * projectInfo.getMultiplierToMm();
-							vertex[2] = vertex[2] * projectInfo.getMultiplierToMm();
+							vertex[0] = vertex[0] * (double)projectInfo.getMultiplierToMm();
+							vertex[1] = vertex[1] * (double)projectInfo.getMultiplierToMm();
+							vertex[2] = vertex[2] * (double)projectInfo.getMultiplierToMm();
 						}
 						
 //						float[] matrix = vertexQuantizationMatrices.get(croid);
-						float[] matrix = vertexQuantizationMatrix;
+						double[] matrix = vertexQuantizationMatrix;
 						if (matrix == null) {
 							LOGGER.error("Missing quant matrix for " + croid);
 							return false;
@@ -934,27 +934,30 @@ public class BinaryGeometryMessagingStreamingSerializer implements MessagingStre
 					serializerDataOutputStream.align8();
 				}
 			} else {
-				ByteBuffer vertexByteBuffer = ByteBuffer.wrap(vertices);
-				int nrPos = vertexByteBuffer.capacity() / 4;
+				ByteBuffer vertexByteBuffer = ByteBuffer.wrap(vertices).order(ByteOrder.LITTLE_ENDIAN);
+				int nrPos = vertexByteBuffer.capacity() / 8;
 				serializerDataOutputStream.writeInt(nrPos);
 				if (normalizeUnitsToMM && projectInfo.getMultiplierToMm() != 1f) {
 					vertexByteBuffer.order(ByteOrder.LITTLE_ENDIAN);
-					serializerDataOutputStream.ensureExtraCapacity(vertexByteBuffer.capacity() * 6 / 4); // TODO unchecked
-					float[] vertex = new float[3];
+					serializerDataOutputStream.ensureExtraCapacity(vertexByteBuffer.capacity() * 6 / 8); // TODO unchecked
+					double[] vertex = new double[3];
 					for (int i=0; i<nrPos; i+=3) {
-						vertex[0] = vertexByteBuffer.getFloat();
-						vertex[1] = vertexByteBuffer.getFloat();
-						vertex[2] = vertexByteBuffer.getFloat();
-						vertex[0] = vertex[0] * projectInfo.getMultiplierToMm();
-						vertex[1] = vertex[1] * projectInfo.getMultiplierToMm();
-						vertex[2] = vertex[2] * projectInfo.getMultiplierToMm();
+						vertex[0] = vertexByteBuffer.getDouble();
+						vertex[1] = vertexByteBuffer.getDouble();
+						vertex[2] = vertexByteBuffer.getDouble();
+						vertex[0] = vertex[0] * (double)projectInfo.getMultiplierToMm();
+						vertex[1] = vertex[1] * (double)projectInfo.getMultiplierToMm();
+						vertex[2] = vertex[2] * (double)projectInfo.getMultiplierToMm();
 						
-						serializerDataOutputStream.writeFloatUnchecked(vertex[0]);
-						serializerDataOutputStream.writeFloatUnchecked(vertex[1]);
-						serializerDataOutputStream.writeFloatUnchecked(vertex[2]);
+						serializerDataOutputStream.writeFloatUnchecked((float) vertex[0]);
+						serializerDataOutputStream.writeFloatUnchecked((float) vertex[1]);
+						serializerDataOutputStream.writeFloatUnchecked((float) vertex[2]);
 					}
 				} else {
-					serializerDataOutputStream.write(vertexByteBuffer.array());
+					DoubleBuffer vertexDoubleBuffer = vertexByteBuffer.asDoubleBuffer();
+					for (int i=0; i<vertexDoubleBuffer.capacity(); i++) {
+						serializerDataOutputStream.writeFloat((float) vertexDoubleBuffer.get(i));
+					}
 				}
 			}
 			
