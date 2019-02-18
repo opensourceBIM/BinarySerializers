@@ -21,7 +21,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 public class GeometryBuffer {
-	private static final int THRESHOLD = 100000;
+	private static final int THRESHOLD = 50000;
 
 	private final List<GeometrySubBuffer> geometryMappings = new ArrayList<>();
 	private int currentIndex;
