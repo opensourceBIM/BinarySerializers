@@ -157,6 +157,8 @@ public class BinaryGeometryMessagingStreamingSerializer implements MessagingStre
 
 	private Set<Long> reusedDataOids;
 
+	private double[] globalTransformation;
+
 	@Override
 	public void init(ObjectProvider objectProvider, ProjectInfo projectInfo, PluginManagerInterface pluginManager, PackageMetaData packageMetaData) throws SerializerException {
 		this.objectProvider = objectProvider;
@@ -184,6 +186,14 @@ public class BinaryGeometryMessagingStreamingSerializer implements MessagingStre
 			reportProgress = !geometrySettings.has("reportProgress") || geometrySettings.get("reportProgress").asBoolean(); // default is true for backwards compat
 			useSmallInts = !geometrySettings.has("useSmallInts") || geometrySettings.get("useSmallInts").asBoolean(); // default is true for backwards compat
 			prepareBuffers = geometrySettings.has("prepareBuffers") && geometrySettings.get("prepareBuffers").asBoolean();
+			if (geometrySettings.has("globalTransformation")) {
+				this.globalTransformation = new double[16];
+				ArrayNode matrixNode = (ArrayNode) geometrySettings.get("globalTransformation");
+				int i=0;
+				for (JsonNode v : matrixNode) {
+					this.globalTransformation[i++] = v.asDouble();
+				}
+			}
 			if (prepareBuffers) {
 				transparentGeometryBuffer = new GeometryBuffer();
 				opaqueGeometryBuffer = new GeometryBuffer();
@@ -313,7 +323,7 @@ public class BinaryGeometryMessagingStreamingSerializer implements MessagingStre
 			int indicesStartByte = 20;
 			int indicesMappingStartByte = indicesStartByte + geometryMapping.getNrIndices() * 4;
 			int verticesStartByte = indicesMappingStartByte + geometryMapping.getNrObjects() * 28 + geometryMapping.getTotalColorPackSize();
-			int normalsStartByte = verticesStartByte + geometryMapping.getNrVertices() * 2;
+			int normalsStartByte = verticesStartByte + geometryMapping.getNrVertices() * (quantizeVertices ? 2 : 4);
 			
 			int baseIndex = geometryMapping.getBaseIndex();
 			
@@ -396,21 +406,27 @@ public class BinaryGeometryMessagingStreamingSerializer implements MessagingStre
 						vertex[1] = vertex[1] * projectInfo.getMultiplierToMm();
 						vertex[2] = vertex[2] * projectInfo.getMultiplierToMm();
 					}
-	
-					// Apply quantization matrix
-					Matrix.multiplyMV(result, 0, vertexQuantizationMatrix, 0, vertex, 0);
+
+					// Apply the globalTransformation (usually used to move the model to around 0, 0, 0)
+					if (globalTransformation != null) {
+						double[] tmp = new double[4];
+						Matrix.multiplyMV(tmp, 0, globalTransformation, 0, vertex, 0);
+						vertex = tmp;
+					}
 					
-	//				for (int a=0; a<3; a++) {
-	//					if (result[a] < Short.MIN_VALUE || result[a] > Short.MAX_VALUE) {
-	//						System.out.println("err " + result[a]);
-	//					}
-	//				}
-					
-					buffer.putShort(verticesStartByte, (short)result[0]);
-					buffer.putShort(verticesStartByte + 2, (short)result[1]);
-					buffer.putShort(verticesStartByte + 4, (short)result[2]);
-	
-					verticesStartByte += 6;
+					if (quantizeVertices) {
+						// Apply quantization matrix
+						Matrix.multiplyMV(result, 0, vertexQuantizationMatrix, 0, vertex, 0);
+						buffer.putShort(verticesStartByte, (short)result[0]);
+						buffer.putShort(verticesStartByte + 2, (short)result[1]);
+						buffer.putShort(verticesStartByte + 4, (short)result[2]);
+						verticesStartByte += 6;
+					} else {
+						buffer.putFloat(verticesStartByte, (float) vertex[0]);
+						buffer.putFloat(verticesStartByte + 4, (float) vertex[1]);
+						buffer.putFloat(verticesStartByte + 8, (float) vertex[2]);
+						verticesStartByte += 12;
+					}
 				}
 				
 				vertexPosition += nrPos;
@@ -1041,7 +1057,7 @@ public class BinaryGeometryMessagingStreamingSerializer implements MessagingStre
 		
 		currentGeometryMapping.incPreparedSize( 
 			nrIndices * 4 + // Each index number uses 4 bytes
-			nrVertices * 2 + // Each vertex uses 2 bytes (quantized) per number
+			nrVertices * (quantizeVertices ? 2 : 4) + // Each vertex uses 2 bytes (quantized) per number
 			nrVertices * 1 + // Each vertex uses 1 byte per number for (quantized) normals
 			4 + // Density
 			(colorPackData == null ? 0 : colorPackData.length) + //
