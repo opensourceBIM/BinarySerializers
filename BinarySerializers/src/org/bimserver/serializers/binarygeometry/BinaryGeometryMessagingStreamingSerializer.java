@@ -599,17 +599,29 @@ public class BinaryGeometryMessagingStreamingSerializer implements MessagingStre
 		
 		lastTransformation = ByteBuffer.wrap(transformation);
 		lastTransformation.order(ByteOrder.LITTLE_ENDIAN);
-		DoubleBuffer asDoubleBuffer = lastTransformation.asDoubleBuffer();
-		double[] ms = new double[16];
-		for (int i=0; i<16; i++) {
-			ms[i] = asDoubleBuffer.get();
+		
+		ByteBuffer newTransformation = lastTransformation;
+		
+		// Apply the globalTransformation (usually used to move the model to around 0, 0, 0)
+		if (globalTransformation != null) {
+			DoubleBuffer asDoubleBuffer = lastTransformation.asDoubleBuffer();
+			double[] ms = new double[16];
+			for (int i=0; i<16; i++) {
+				ms[i] = asDoubleBuffer.get();
+			}
+
+			double[] tmp = new double[16];
+			Matrix.multiplyMM(tmp, 0, globalTransformation, 0, ms, 0);
+			ms = tmp;
+
+			newTransformation = ByteBuffer.wrap(new byte[16 * 8]).order(ByteOrder.LITTLE_ENDIAN);
+			for (double d : ms) {
+				newTransformation.putDouble(d);
+			}
 		}
-//		if (!Matrix.invertM(inverse , 0, ms, 0)) {
-//			System.out.println("NO INVERSE!");
-//		}
 		
 		serializerDataOutputStream.ensureExtraCapacity(((byte[])transformation).length + 8);
-		serializerDataOutputStream.write(transformation);
+		serializerDataOutputStream.write(newTransformation.array());
 		serializerDataOutputStream.writeLong(dataOid);
 		
 		nrObjectsWritten++;
