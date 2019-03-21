@@ -35,7 +35,7 @@ import org.bimserver.database.queries.om.QueryException;
 import org.bimserver.emf.PackageMetaData;
 import org.bimserver.geometry.Matrix;
 import org.bimserver.geometry.Matrix3;
-import org.bimserver.geometry.Vector3;
+import org.bimserver.geometry.Vector3D;
 import org.bimserver.interfaces.objects.SVector3f;
 import org.bimserver.models.geometry.GeometryPackage;
 import org.bimserver.plugins.LittleEndianSerializerDataOutputStream;
@@ -448,7 +448,7 @@ public class BinaryGeometryMessagingStreamingSerializer implements MessagingStre
 	
 					// Apply the transformation matrix of the object
 					Matrix3.multiplyMV(normal, normalIn, transposed);
-					Vector3.normalize(normal, normal);
+					Vector3D.normalize(normal, normal);
 					
 					buffer.put(normalsStartByte, (byte)(normal[0] * 127f));
 					buffer.put(normalsStartByte + 1, (byte)(normal[1] * 127f));
