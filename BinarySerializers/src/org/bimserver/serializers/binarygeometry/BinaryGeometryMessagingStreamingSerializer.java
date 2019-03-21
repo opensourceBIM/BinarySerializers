@@ -610,9 +610,20 @@ public class BinaryGeometryMessagingStreamingSerializer implements MessagingStre
 				ms[i] = asDoubleBuffer.get();
 			}
 
-			double[] tmp = new double[16];
-			Matrix.multiplyMM(tmp, 0, globalTransformation, 0, ms, 0);
-			ms = tmp;
+			if (projectInfo.getMultiplierToMm() == 1f) {
+				double[] tmp = new double[16];
+				Matrix.multiplyMM(tmp, 0, globalTransformation, 0, ms, 0);
+				ms = tmp;
+			} else {
+				double[] tmp = new double[16];
+				double[] conv = new double[16];
+				Matrix.copy(globalTransformation, conv);
+				conv[12] /= projectInfo.getMultiplierToMm();
+				conv[13] /= projectInfo.getMultiplierToMm();
+				conv[14] /= projectInfo.getMultiplierToMm();
+				Matrix.multiplyMM(tmp, 0, conv, 0, ms, 0);
+				ms = tmp;
+			}
 
 			newTransformation = ByteBuffer.wrap(new byte[16 * 8]).order(ByteOrder.LITTLE_ENDIAN);
 			for (double d : ms) {
