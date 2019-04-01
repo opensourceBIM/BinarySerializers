@@ -24,6 +24,12 @@ import java.util.Set;
 import org.bimserver.models.geometry.GeometryPackage;
 import org.bimserver.shared.HashMapVirtualObject;
 
+/**
+ * @author Ruben de Laat
+ *
+ *	The GeometrySubBuffers are only used to keep the actual message size low (around 1 MB). This is done because WebSockets did not perform well with bigger messages (client side). On the client all GeometrySubBuffers combined result in 1 buffer object.
+ *
+ */
 public class GeometrySubBuffer {
 	private final Map<HashMapVirtualObject, HashMapVirtualObject> mapping = new LinkedHashMap<>();
 	private int nrTriangles = 0;

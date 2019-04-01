@@ -136,8 +136,8 @@ public class BinaryGeometryMessagingStreamingSerializer implements MessagingStre
 	private boolean reportProgress = true;
 	private Map<Long, float[]> vertexQuantizationMatrices;
 	
-	private GeometryBuffer transparentGeometryBuffer;
-	private GeometryBuffer opaqueGeometryBuffer;
+	private GeometryMainBuffer transparentGeometryBuffer;
+	private GeometryMainBuffer opaqueGeometryBuffer;
 	
 	private final Map<Long, HashMapVirtualObject> oidToGeometryData = new HashMap<>();
 	private final Map<Long, HashMapVirtualObject> dataToGeometryInfo = new HashMap<>();
@@ -195,8 +195,8 @@ public class BinaryGeometryMessagingStreamingSerializer implements MessagingStre
 				}
 			}
 			if (prepareBuffers) {
-				transparentGeometryBuffer = new GeometryBuffer();
-				opaqueGeometryBuffer = new GeometryBuffer();
+				transparentGeometryBuffer = new GeometryMainBuffer();
+				opaqueGeometryBuffer = new GeometryMainBuffer();
 			}
 			if (quantizeVertices) {
 				if (queryNode.has("loaderSettings")) {
@@ -289,9 +289,14 @@ public class BinaryGeometryMessagingStreamingSerializer implements MessagingStre
 
 	private boolean writePreparedBuffer(Mode mode) throws IOException, SerializerException {
 		try {
-			GeometryBuffer geometryBuffer = getCurrentBuffer();
-			if (geometryBuffer.isEmpty() || !geometryBuffer.hasNextGeometryMapping()) {
-				return false;
+			GeometryMainBuffer geometryMainBuffer = getCurrentMainBuffer();
+			GeometryBuffer geometryBuffer = geometryMainBuffer.getCurrentReadBuffer();
+			while (geometryBuffer == null || geometryBuffer.isEmpty() || !geometryBuffer.hasNextGeometryMapping()) {
+				if (geometryMainBuffer.hasNextReadBuffer()) {
+					geometryBuffer = geometryMainBuffer.getNextReadBuffer();
+				} else {
+					return false;
+				}
 			}
 			if (!geometryBuffer.initSent()) {
 				ByteBuffer buffer = ByteBuffer.allocate(21).order(ByteOrder.LITTLE_ENDIAN);
@@ -322,7 +327,7 @@ public class BinaryGeometryMessagingStreamingSerializer implements MessagingStre
 			buffer.putInt(geometryMapping.getNrColors());
 			int indicesStartByte = 20;
 			int indicesMappingStartByte = indicesStartByte + geometryMapping.getNrIndices() * 4;
-			int verticesStartByte = indicesMappingStartByte + geometryMapping.getNrObjects() * 28 + geometryMapping.getTotalColorPackSize();
+			int verticesStartByte = indicesMappingStartByte + geometryMapping.getNrObjects() * 36 + geometryMapping.getTotalColorPackSize();
 			int normalsStartByte = verticesStartByte + geometryMapping.getNrVertices() * (quantizeVertices ? 2 : 4);
 			
 			int baseIndex = geometryMapping.getBaseIndex();
@@ -357,6 +362,29 @@ public class BinaryGeometryMessagingStreamingSerializer implements MessagingStre
 				indicesMappingStartByte += 4;
 				buffer.putInt(indicesMappingStartByte, vertices.length / 8);
 				indicesMappingStartByte += 4;
+
+				int minIndex = -1;
+				int maxIndex = -1;
+				
+				for (int i=0; i<indices.capacity(); i++) {
+					int index = indices.get();
+					
+					int modifiedIndex = baseIndex + index + (vertexPosition / 3);
+					if (minIndex == -1 || modifiedIndex < minIndex) {
+						minIndex = modifiedIndex;
+					}
+					if (maxIndex == -1 || modifiedIndex > maxIndex) {
+						maxIndex = modifiedIndex;
+					}
+					
+					buffer.putInt(indicesStartByte, baseIndex + index + (vertexPosition / 3));
+					indicesStartByte += 4;
+				}
+				
+				buffer.putInt(indicesMappingStartByte, minIndex);
+				indicesMappingStartByte += 4;
+				buffer.putInt(indicesMappingStartByte, maxIndex);
+				indicesMappingStartByte += 4;
 				
 				float density = (float) info.get("density");
 				buffer.putFloat(indicesMappingStartByte, density);
@@ -375,14 +403,7 @@ public class BinaryGeometryMessagingStreamingSerializer implements MessagingStre
 					buffer.put(colorPackData);
 					indicesMappingStartByte += colorPackData.length;
 				}
-				
-				for (int i=0; i<indices.capacity(); i++) {
-					int index = indices.get();
-					
-					buffer.putInt(indicesStartByte, baseIndex + index + (vertexPosition / 3));
-					indicesStartByte += 4;
-				}
-				
+
 				ByteBuffer vertexByteBuffer = ByteBuffer.wrap(vertices).order(ByteOrder.LITTLE_ENDIAN);
 				ByteBuffer normalsByteBuffer = ByteBuffer.wrap(normals).order(ByteOrder.LITTLE_ENDIAN);
 				
@@ -459,7 +480,7 @@ public class BinaryGeometryMessagingStreamingSerializer implements MessagingStre
 			}
 			serializerDataOutputStream.write(buffer.array());
 			serializerDataOutputStream.align8();
-			return geometryBuffer.hasNextGeometryMapping();
+			return geometryMainBuffer.hasNextReadBuffer() || geometryBuffer.hasNextGeometryMapping();
 		} catch (IndexOutOfBoundsException e) {
 			throw e;
 		}
@@ -564,7 +585,8 @@ public class BinaryGeometryMessagingStreamingSerializer implements MessagingStre
 		if (prepareBuffers && (reusedDataOids == null || !reusedDataOids.contains(geometryDataId))) {
 			inPreparedBuffer = true;
 			if (oidToGeometryData.containsKey(geometryDataId)) {
-				GeometryBuffer currentBuffer = getCurrentBuffer(hasTransparancy);
+				GeometryMainBuffer geometryMainBuffer = getCurrentMainBuffer(hasTransparancy);
+				GeometryBuffer currentBuffer = geometryMainBuffer.getCurrentWriteBuffer();
 				GeometrySubBuffer geometryMapping = currentBuffer.getCurrentGeometryMapping(true);
 				HashMapVirtualObject gd = oidToGeometryData.get(geometryDataId);
 				geometryMapping.put(info, gd);
@@ -714,7 +736,8 @@ public class BinaryGeometryMessagingStreamingSerializer implements MessagingStre
 		if (prepareBuffers && (reusedDataOids == null || !reusedDataOids.contains(oid))) {
 			oidToGeometryData.put(oid, data);
 			if (dataToGeometryInfo.containsKey(oid)) {
-				GeometryBuffer currentBuffer = getCurrentBuffer(hasTransparancy);
+				GeometryMainBuffer geometryMainBuffer = getCurrentMainBuffer(hasTransparancy);
+				GeometryBuffer currentBuffer = geometryMainBuffer.getCurrentWriteBuffer();
 				GeometrySubBuffer geometryMapping = currentBuffer.getCurrentGeometryMapping(true);
 				geometryMapping.put(dataToGeometryInfo.get(oid), data);
 				updateSize(data, currentBuffer);
@@ -1084,10 +1107,10 @@ public class BinaryGeometryMessagingStreamingSerializer implements MessagingStre
 			nrVertices * 1 + // Each vertex uses 1 byte per number for (quantized) normals
 			4 + // Density
 			(colorPackData == null ? 0 : colorPackData.length) + //
-			24); // 8 for the oid, 4 for the startIndex, 4 for the nrIndices
+			32); // 8 for the oid, 4 for the startIndex, 4 for the nrIndices
 	}
 	
-	private GeometryBuffer getCurrentBuffer() {
+	private GeometryMainBuffer getCurrentMainBuffer() {
 		if (mode == Mode.PREPARED_BUFFER_TRANSPARENT) {
 			return transparentGeometryBuffer;
 		} else if (mode == Mode.PREPARED_BUFFER_OPAQUE) {
@@ -1096,7 +1119,7 @@ public class BinaryGeometryMessagingStreamingSerializer implements MessagingStre
 		return null;
 	}
 
-	private GeometryBuffer getCurrentBuffer(boolean hasTransparency) {
+	private GeometryMainBuffer getCurrentMainBuffer(boolean hasTransparency) {
 		if (hasTransparency) {
 			return transparentGeometryBuffer;
 		} else {
