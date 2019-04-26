@@ -166,7 +166,7 @@ public class BinaryGeometryMessagingStreamingSerializer implements MessagingStre
 		ObjectNode queryNode = objectProvider.getQueryNode();
 		if (queryNode.has("tiles")) {
 			ObjectNode tilesNode = (ObjectNode)queryNode.get("tiles");
-			if (tilesNode.has("geometryDataToReuse")) {
+			if (!tilesNode.has("geometryDataToReuse") && tilesNode.get("geometryDataToReuse").isNull()) {
 				ArrayNode reuseNodes = (ArrayNode)tilesNode.get("geometryDataToReuse");
 				this.reusedDataOids = new HashSet<>();
 				for (JsonNode jsonNode : reuseNodes) {
