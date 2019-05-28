@@ -35,6 +35,7 @@ import org.bimserver.database.queries.om.QueryException;
 import org.bimserver.emf.PackageMetaData;
 import org.bimserver.geometry.Matrix;
 import org.bimserver.geometry.Matrix3;
+import org.bimserver.geometry.Vector;
 import org.bimserver.geometry.Vector3D;
 import org.bimserver.interfaces.objects.SVector3f;
 import org.bimserver.models.geometry.GeometryPackage;
@@ -88,9 +89,11 @@ public class BinaryGeometryMessagingStreamingSerializer implements MessagingStre
 	 *  Version 17:
 	 *  - Sending the amount of colors now for GeometryInfo and also sending 1 byte to indicate whether geometry is in a completeBuffer
 	 *  - Added writePreparedBuffer (should not have an impact if you don't send the prepareBuffers option)
+	 *  Version 18:
+	 *  - Oct-encoding of normals, mat4 globalTransformation input is now vec3 globalTranslationVector
 	 */
 	
-	private static final byte FORMAT_VERSION = 17;
+	private static final byte FORMAT_VERSION = 18;
 	
 	private enum Mode {
 		LOAD,
@@ -157,7 +160,7 @@ public class BinaryGeometryMessagingStreamingSerializer implements MessagingStre
 
 	private Set<Long> reusedDataOids;
 
-	private double[] globalTransformation;
+	private double[] globalTranslation;
 
 	@Override
 	public void init(ObjectProvider objectProvider, ProjectInfo projectInfo, PluginManagerInterface pluginManager, PackageMetaData packageMetaData) throws SerializerException {
@@ -186,12 +189,12 @@ public class BinaryGeometryMessagingStreamingSerializer implements MessagingStre
 			reportProgress = !geometrySettings.has("reportProgress") || geometrySettings.get("reportProgress").asBoolean(); // default is true for backwards compat
 			useSmallInts = !geometrySettings.has("useSmallInts") || geometrySettings.get("useSmallInts").asBoolean(); // default is true for backwards compat
 			prepareBuffers = geometrySettings.has("prepareBuffers") && geometrySettings.get("prepareBuffers").asBoolean();
-			if (geometrySettings.has("globalTransformation")) {
-				this.globalTransformation = new double[16];
-				ArrayNode matrixNode = (ArrayNode) geometrySettings.get("globalTransformation");
+			if (geometrySettings.has("globalTranslationVector")) {
+				this.globalTranslation = new double[3];
+				ArrayNode matrixNode = (ArrayNode) geometrySettings.get("globalTranslationVector");
 				int i=0;
 				for (JsonNode v : matrixNode) {
-					this.globalTransformation[i++] = v.asDouble();
+					this.globalTranslation[i++] = v.asDouble();
 				}
 			}
 			if (prepareBuffers) {
@@ -428,11 +431,9 @@ public class BinaryGeometryMessagingStreamingSerializer implements MessagingStre
 						vertex[2] = vertex[2] * projectInfo.getMultiplierToMm();
 					}
 
-					// Apply the globalTransformation (usually used to move the model to around 0, 0, 0)
-					if (globalTransformation != null) {
-						double[] tmp = new double[4];
-						Matrix.multiplyMV(tmp, 0, globalTransformation, 0, vertex, 0);
-						vertex = tmp;
+					// Apply the globalTranslation (usually used to move the model to around 0, 0, 0)
+					if (globalTranslation != null) {
+						Vector.addition(vertex, globalTranslation, vertex);
 					}
 					
 					if (quantizeVertices) {
@@ -470,12 +471,10 @@ public class BinaryGeometryMessagingStreamingSerializer implements MessagingStre
 					// Apply the transformation matrix of the object
 					Matrix3.multiplyMV(normal, normalIn, transposed);
 					Vector3D.normalize(normal, normal);
-					
-					buffer.put(normalsStartByte, (byte)(normal[0] * 127f));
-					buffer.put(normalsStartByte + 1, (byte)(normal[1] * 127f));
-					buffer.put(normalsStartByte + 2, (byte)(normal[2] * 127f));
+
+					writeNormalToOct(buffer, normalsStartByte, normal);
 	
-					normalsStartByte += 3;
+					normalsStartByte += 2;
 				}
 			}
 			serializerDataOutputStream.write(buffer.array());
@@ -484,6 +483,49 @@ public class BinaryGeometryMessagingStreamingSerializer implements MessagingStre
 		} catch (IndexOutOfBoundsException e) {
 			throw e;
 		}
+	}
+
+	private float signNotZero(float in) {
+		return in >= 0f ? 1 : -1;
+	}
+	
+//	function octEncodeVec3(array, i, xfunc, yfunc) {
+//        var x = array[i    ] / (Math.abs(array[i]) + Math.abs(array[i + 1]) + Math.abs(array[i + 2]));
+//        var y = array[i + 1] / (Math.abs(array[i]) + Math.abs(array[i + 1]) + Math.abs(array[i + 2]));
+//
+//        if (array[i + 2] < 0) {
+//            var tempx = x;
+//            var tempy = y;
+//            tempx = (1 - Math.abs(y)) * (x >= 0 ? 1 : -1);
+//            tempy = (1 - Math.abs(x)) * (y >= 0 ? 1 : -1);
+//            x = tempx;
+//            y = tempy;
+//        }
+//
+//        return new Int8Array([
+//            Math[xfunc](x * 127.5 + (x < 0 ? -1 : 0)),
+//            Math[yfunc](y * 127.5 + (y < 0 ? -1 : 0))
+//        ]);
+//
+//    }
+	
+	private void writeNormalToOct(ByteBuffer buffer, int normalsStartByte, float[] normal) {
+		float x = Math.abs(normal[0]) + Math.abs(normal[1]) + Math.abs(normal[2]);
+		float[] p = new float[] {normal[0] / x, normal[1] / x};
+		
+		if (normal[2] <= 0f) {
+			float a = (1f - Math.abs(p[0])) * signNotZero(p[0]);
+			float b = (1f - Math.abs(p[1])) * signNotZero(p[1]);
+			p = new float[]{a, b};
+		}
+
+		byte a = (byte)(p[0] * 127f);
+		buffer.put(normalsStartByte, a);
+		byte b = (byte)(p[1] * 127f);
+		buffer.put(normalsStartByte + 1, b);
+		
+//		System.out.println(normal[0] + ", " + normal[1] + ", " + normal[2]);
+//		System.out.println(a + ", " + b);
 	}
 
 	private void load() throws SerializerException {
@@ -624,28 +666,21 @@ public class BinaryGeometryMessagingStreamingSerializer implements MessagingStre
 		
 		ByteBuffer newTransformation = lastTransformation;
 		
-		// Apply the globalTransformation (usually used to move the model to around 0, 0, 0)
-		if (globalTransformation != null) {
+		// Apply the globalTranslation (usually used to move the model to around 0, 0, 0)
+		if (globalTranslation != null) {
 			DoubleBuffer asDoubleBuffer = lastTransformation.asDoubleBuffer();
 			double[] ms = new double[16];
 			for (int i=0; i<16; i++) {
 				ms[i] = asDoubleBuffer.get();
 			}
 
+			double[] tmp = new double[16];
 			if (projectInfo.getMultiplierToMm() == 1f) {
-				double[] tmp = new double[16];
-				Matrix.multiplyMM(tmp, 0, globalTransformation, 0, ms, 0);
-				ms = tmp;
+				Matrix.translateM(tmp, 0, ms, 0, globalTranslation[0], globalTranslation[1], globalTranslation[2]);
 			} else {
-				double[] tmp = new double[16];
-				double[] conv = new double[16];
-				Matrix.copy(globalTransformation, conv);
-				conv[12] /= projectInfo.getMultiplierToMm();
-				conv[13] /= projectInfo.getMultiplierToMm();
-				conv[14] /= projectInfo.getMultiplierToMm();
-				Matrix.multiplyMM(tmp, 0, conv, 0, ms, 0);
-				ms = tmp;
+				Matrix.translateM(tmp, 0, ms, 0, globalTranslation[0] / projectInfo.getMultiplierToMm(), globalTranslation[1] / projectInfo.getMultiplierToMm(), globalTranslation[2] / projectInfo.getMultiplierToMm());
 			}
+			ms = tmp;
 
 			newTransformation = ByteBuffer.wrap(new byte[16 * 8]).order(ByteOrder.LITTLE_ENDIAN);
 			for (double d : ms) {
@@ -1104,7 +1139,7 @@ public class BinaryGeometryMessagingStreamingSerializer implements MessagingStre
 		currentGeometryMapping.incPreparedSize( 
 			nrIndices * 4 + // Each index number uses 4 bytes
 			nrVertices * (quantizeVertices ? 2 : 4) + // Each vertex uses 2 bytes (quantized) per number
-			nrVertices * 1 + // Each vertex uses 1 byte per number for (quantized) normals
+			((nrVertices / 3) * 2) + // Each vertex uses 2 bytes per normal for (oct-encoded) normals
 			4 + // Density
 			(colorPackData == null ? 0 : colorPackData.length) + //
 			32); // 8 for the oid, 4 for the startIndex, 4 for the nrIndices
