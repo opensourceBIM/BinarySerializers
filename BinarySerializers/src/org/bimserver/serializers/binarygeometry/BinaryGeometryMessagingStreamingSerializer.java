@@ -160,7 +160,7 @@ public class BinaryGeometryMessagingStreamingSerializer implements MessagingStre
 
 	private Set<Long> reusedDataOids;
 
-	private double[] globalTranslation;
+	private double[] globalTranslationVector;
 
 	@Override
 	public void init(ObjectProvider objectProvider, ProjectInfo projectInfo, PluginManagerInterface pluginManager, PackageMetaData packageMetaData) throws SerializerException {
@@ -169,7 +169,7 @@ public class BinaryGeometryMessagingStreamingSerializer implements MessagingStre
 		ObjectNode queryNode = objectProvider.getQueryNode();
 		if (queryNode.has("tiles")) {
 			ObjectNode tilesNode = (ObjectNode)queryNode.get("tiles");
-			if (!tilesNode.has("geometryDataToReuse") && tilesNode.get("geometryDataToReuse").isNull()) {
+			if (tilesNode.has("geometryDataToReuse") && !tilesNode.get("geometryDataToReuse").isNull()) {
 				ArrayNode reuseNodes = (ArrayNode)tilesNode.get("geometryDataToReuse");
 				this.reusedDataOids = new HashSet<>();
 				for (JsonNode jsonNode : reuseNodes) {
@@ -190,11 +190,11 @@ public class BinaryGeometryMessagingStreamingSerializer implements MessagingStre
 			useSmallInts = !geometrySettings.has("useSmallInts") || geometrySettings.get("useSmallInts").asBoolean(); // default is true for backwards compat
 			prepareBuffers = geometrySettings.has("prepareBuffers") && geometrySettings.get("prepareBuffers").asBoolean();
 			if (geometrySettings.has("globalTranslationVector")) {
-				this.globalTranslation = new double[3];
+				this.globalTranslationVector = new double[3];
 				ArrayNode matrixNode = (ArrayNode) geometrySettings.get("globalTranslationVector");
 				int i=0;
 				for (JsonNode v : matrixNode) {
-					this.globalTranslation[i++] = v.asDouble();
+					this.globalTranslationVector[i++] = v.asDouble();
 				}
 			}
 			if (prepareBuffers) {
@@ -355,6 +355,11 @@ public class BinaryGeometryMessagingStreamingSerializer implements MessagingStre
 				vertices = (byte[]) verticesBuffer.get("data");
 				IntBuffer indices = ByteBuffer.wrap((byte[]) indicesBuffer.get("data")).order(ByteOrder.LITTLE_ENDIAN).asIntBuffer();
 	
+				ByteBuffer vertexByteBuffer = ByteBuffer.wrap(vertices).order(ByteOrder.LITTLE_ENDIAN);
+				ByteBuffer normalsByteBuffer = ByteBuffer.wrap(normals).order(ByteOrder.LITTLE_ENDIAN);
+
+//				reorderForLineRendering(indices, vertexByteBuffer.asFloatBuffer(), normalsByteBuffer.asFloatBuffer());
+				
 				Long oid = (Long)info.get("ifcProductOid");
 //				EClass eClass = objectProvider.getEClassForOid(oid);
 				buffer.putLong(indicesMappingStartByte, oid);
@@ -407,9 +412,6 @@ public class BinaryGeometryMessagingStreamingSerializer implements MessagingStre
 					indicesMappingStartByte += colorPackData.length;
 				}
 
-				ByteBuffer vertexByteBuffer = ByteBuffer.wrap(vertices).order(ByteOrder.LITTLE_ENDIAN);
-				ByteBuffer normalsByteBuffer = ByteBuffer.wrap(normals).order(ByteOrder.LITTLE_ENDIAN);
-				
 				double[] in = new double[4];
 				double[] vertex = new double[4];
 				double[] result = new double[4];
@@ -432,8 +434,8 @@ public class BinaryGeometryMessagingStreamingSerializer implements MessagingStre
 					}
 
 					// Apply the globalTranslation (usually used to move the model to around 0, 0, 0)
-					if (globalTranslation != null) {
-						Vector.addition(vertex, globalTranslation, vertex);
+					if (globalTranslationVector != null) {
+						Vector.addition(vertex, globalTranslationVector, vertex);
 					}
 					
 					if (quantizeVertices) {
@@ -482,6 +484,29 @@ public class BinaryGeometryMessagingStreamingSerializer implements MessagingStre
 			return geometryMainBuffer.hasNextReadBuffer() || geometryBuffer.hasNextGeometryMapping();
 		} catch (IndexOutOfBoundsException e) {
 			throw e;
+		}
+	}
+
+	private void reorderForLineRendering(IntBuffer indices, DoubleBuffer vertices, FloatBuffer normals) {
+		Mesh mesh = new Mesh(indices, vertices, normals);
+		Mesh newMesh = mesh.copy();
+		MeshChanger meshChanger = new MeshChanger(mesh, newMesh);
+		
+		Map<LineSegment, LineSegment> lineSegments = new HashMap<>();
+		for (int i=0; i<indices.capacity(); i+=3) {
+			int[] triangle = new int[] {indices.get(), indices.get(), indices.get()};
+			for (int j=0; j<3; j++) {
+				LineSegment lineSegment = new LineSegment(i / 3, triangle[j], triangle[(j+1)%3]);
+				if (lineSegments.containsKey(lineSegment)) {
+					lineSegments.remove(lineSegment);
+				} else {
+					lineSegments.put(lineSegment, lineSegment);
+				}
+			}
+		}
+		
+		for (LineSegment lineSegment : lineSegments.keySet()) {
+			lineSegment.getIndex1();
 		}
 	}
 
@@ -667,7 +692,7 @@ public class BinaryGeometryMessagingStreamingSerializer implements MessagingStre
 		ByteBuffer newTransformation = lastTransformation;
 		
 		// Apply the globalTranslation (usually used to move the model to around 0, 0, 0)
-		if (globalTranslation != null) {
+		if (globalTranslationVector != null) {
 			DoubleBuffer asDoubleBuffer = lastTransformation.asDoubleBuffer();
 			double[] ms = new double[16];
 			for (int i=0; i<16; i++) {
@@ -675,11 +700,10 @@ public class BinaryGeometryMessagingStreamingSerializer implements MessagingStre
 			}
 
 			double[] tmp = new double[16];
-			if (projectInfo.getMultiplierToMm() == 1f) {
-				Matrix.translateM(tmp, 0, ms, 0, globalTranslation[0], globalTranslation[1], globalTranslation[2]);
-			} else {
-				Matrix.translateM(tmp, 0, ms, 0, globalTranslation[0] / projectInfo.getMultiplierToMm(), globalTranslation[1] / projectInfo.getMultiplierToMm(), globalTranslation[2] / projectInfo.getMultiplierToMm());
-			}
+			double[] translationMatrix = new double[16];
+			Matrix.setIdentityM(translationMatrix, 0);
+			Matrix.translateM(translationMatrix, 0, translationMatrix, 0, globalTranslationVector[0] / projectInfo.getMultiplierToMm(), globalTranslationVector[1] / projectInfo.getMultiplierToMm(), globalTranslationVector[2] / projectInfo.getMultiplierToMm());
+			Matrix.multiplyMM(tmp, 0, translationMatrix, 0, ms, 0);
 			ms = tmp;
 
 			newTransformation = ByteBuffer.wrap(new byte[16 * 8]).order(ByteOrder.LITTLE_ENDIAN);
@@ -1059,8 +1083,17 @@ public class BinaryGeometryMessagingStreamingSerializer implements MessagingStre
 			}
 			
 			if (quantizeNormals && normalsQuantized != null) {
-				serializerDataOutputStream.writeInt(normalsQuantized.length);
-				serializerDataOutputStream.write(normalsQuantized);
+				float[] floatNormal = new float[3];
+				byte[] oct = new byte[2];
+				serializerDataOutputStream.writeInt((normalsQuantized.length / 3) * 2);
+				for (int i=0; i<normalsQuantized.length; i+=3) {
+					floatNormal[0] = normalsQuantized[i] / 127;
+					floatNormal[1] = normalsQuantized[i + 1] / 127;
+					floatNormal[2] = normalsQuantized[i + 2] / 127;
+					octEncodeFloat(floatNormal, oct);
+					serializerDataOutputStream.write(oct[0]);
+					serializerDataOutputStream.write(oct[1]);
+				}
 				serializerDataOutputStream.align8();
 			} else {
 				serializerDataOutputStream.writeInt(normals.length / 4);
@@ -1119,6 +1152,20 @@ public class BinaryGeometryMessagingStreamingSerializer implements MessagingStre
 			}
 		}
 		return true;
+	}
+	
+	private void octEncodeFloat(float[] in, byte[] out) {
+		float x = Math.abs(in[0]) + Math.abs(in[1]) + Math.abs(in[2]);
+		float[] p = new float[] {in[0] / x, in[1] / x};
+		
+		if (in[2] <= 0f) {
+			float a = (1f - Math.abs(p[0])) * signNotZero(p[0]);
+			float b = (1f - Math.abs(p[1])) * signNotZero(p[1]);
+			p = new float[]{a, b};
+		}
+
+		out[0] = (byte)(p[0] * 127f);
+		out[1] = (byte)(p[1] * 127f);
 	}
 
 	private void updateSize(HashMapVirtualObject data, GeometryBuffer geometryBuffer) {
