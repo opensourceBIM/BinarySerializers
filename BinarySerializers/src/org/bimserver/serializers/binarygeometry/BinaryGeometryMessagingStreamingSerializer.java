@@ -91,9 +91,11 @@ public class BinaryGeometryMessagingStreamingSerializer implements MessagingStre
 	 *  - Added writePreparedBuffer (should not have an impact if you don't send the prepareBuffers option)
 	 *  Version 18:
 	 *  - Oct-encoding of normals, mat4 globalTransformation input is now vec3 globalTranslationVector
+	 *  Version 19:
+	 *  - Added optional generateLineRenders, protocol has changed because the counts are always sent regardless of setting
 	 */
 	
-	private static final byte FORMAT_VERSION = 18;
+	private static final byte FORMAT_VERSION = 19;
 	
 	private enum Mode {
 		LOAD,
@@ -310,7 +312,7 @@ public class BinaryGeometryMessagingStreamingSerializer implements MessagingStre
 				buffer.put(mode == Mode.PREPARED_BUFFER_OPAQUE ? MessageType.PREPARED_BUFFER_OPAQUE_INIT.getId() : MessageType.PREPARED_BUFFER_TRANSPARENT_INIT.getId());
 				buffer.putInt(geometryBuffer.getNrObjects());
 				buffer.putInt(geometryBuffer.getNrIndices());
-				buffer.putInt(geometryBuffer.getNrLineIndices());
+				buffer.putInt(generateLineRenders ? geometryBuffer.getNrLineIndices() : 0);
 				buffer.putInt(geometryBuffer.getNrVertices());
 				buffer.putInt(geometryBuffer.getNrVertices());
 				buffer.putInt(geometryBuffer.getNrColors());
@@ -329,14 +331,14 @@ public class BinaryGeometryMessagingStreamingSerializer implements MessagingStre
 	
 			buffer.putInt(geometryMapping.getNrObjects());
 			buffer.putInt(geometryMapping.getNrIndices());
-			buffer.putInt(geometryMapping.getNrLineIndices());
+			buffer.putInt(generateLineRenders ? geometryMapping.getNrLineIndices() : 0);
 			buffer.putInt(geometryMapping.getNrVertices());
 			buffer.putInt(geometryMapping.getNrVertices());
 			buffer.putInt(geometryMapping.getNrColors());
 			
 			int indicesStartByte = 24;
 			int lineIndicesStartByte = indicesStartByte + geometryMapping.getNrIndices() * 4;
-			int indicesMappingStartByte = lineIndicesStartByte + geometryMapping.getNrLineIndices() * 4;
+			int indicesMappingStartByte = generateLineRenders ? (lineIndicesStartByte + geometryMapping.getNrLineIndices() * 4) : lineIndicesStartByte;
 			int verticesStartByte = indicesMappingStartByte + geometryMapping.getNrObjects() * 44 + geometryMapping.getTotalColorPackSize();
 			int normalsStartByte = verticesStartByte + geometryMapping.getNrVertices() * (quantizeVertices ? 2 : 4);
 			
@@ -1210,7 +1212,9 @@ public class BinaryGeometryMessagingStreamingSerializer implements MessagingStre
 		GeometrySubBuffer currentGeometryMapping = geometryBuffer.getCurrentGeometryMapping(false);
 		
 		currentGeometryMapping.incNrIndices(nrIndices);
-		currentGeometryMapping.incNrLineIndices(nrLineIndices);
+		if (generateLineRenders) {
+			currentGeometryMapping.incNrLineIndices(nrLineIndices);
+		}
 		currentGeometryMapping.incNrVertices(nrVertices);
 		currentGeometryMapping.incNrColors(colorPackData == null ? 0 : colorPackData.length);
 		currentGeometryMapping.incTotalColorPackSize(colorPackData == null ? 0 : colorPackData.length);
@@ -1218,7 +1222,7 @@ public class BinaryGeometryMessagingStreamingSerializer implements MessagingStre
 		
 		currentGeometryMapping.incPreparedSize( 
 			nrIndices * 4 + // Each index number uses 4 bytes
-			nrLineIndices * 4 + // Each line index number uses 4 bytes as well
+			(generateLineRenders ? (nrLineIndices * 4) : 0) + // Each line index number uses 4 bytes as well
 			nrVertices * (quantizeVertices ? 2 : 4) + // Each vertex uses 2 bytes (quantized) per number
 			((nrVertices / 3) * 2) + // Each vertex uses 2 bytes per normal for (oct-encoded) normals
 			4 + // Density
