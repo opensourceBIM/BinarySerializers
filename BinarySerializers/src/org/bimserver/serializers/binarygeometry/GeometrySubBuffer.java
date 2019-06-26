@@ -34,8 +34,9 @@ public class GeometrySubBuffer {
 	private final Map<HashMapVirtualObject, HashMapVirtualObject> mapping = new LinkedHashMap<>();
 	private int nrTriangles = 0;
 
-	private int preparedByteSize = 20;
+	private int preparedByteSize = 24;
 	private int nrIndices;
+	private int nrLineIndices;
 	private int nrVertices;
 	private int nrColors;
 	private int nrObjects;
@@ -76,6 +77,10 @@ public class GeometrySubBuffer {
 	public int getNrIndices() {
 		return nrIndices;
 	}
+	
+	public int getNrLineIndices() {
+		return nrLineIndices;
+	}
 
 	public void setNrIndices(int nrIndices) {
 		this.nrIndices = nrIndices;
@@ -100,6 +105,11 @@ public class GeometrySubBuffer {
 	public void incNrIndices(int nrIndices) {
 		this.nrIndices += nrIndices;
 		this.geometryBuffer.incNrIndices(nrIndices);
+	}
+
+	public void incNrLineIndices(int nrLineIndices) {
+		this.nrLineIndices += nrLineIndices;
+		this.geometryBuffer.incNrLineIndices(nrLineIndices);
 	}
 
 	public void incNrVertices(int nrVertices) {

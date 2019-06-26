@@ -30,6 +30,8 @@ public class GeometryBuffer {
 
 	private int nrIndices;
 
+	private int nrLineIndices;
+
 	private int nrVertices;
 
 	private int nrColors;
@@ -101,6 +103,10 @@ public class GeometryBuffer {
 	public void incNrIndices(int nrIndices) {
 		this.nrIndices += nrIndices;
 	}
+	
+	public void incNrLineIndices(int nrLineIndices) {
+		this.nrLineIndices += nrLineIndices;
+	}
 
 	public void incNrVertices(int nrVertices) {
 		this.nrVertices += nrVertices;
@@ -116,5 +122,9 @@ public class GeometryBuffer {
 
 	public void incNrObjects() {
 		this.nrObjects++;
+	}
+
+	public int getNrLineIndices() {
+		return this.nrLineIndices;
 	}
 }
