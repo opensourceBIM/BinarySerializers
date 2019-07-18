@@ -298,6 +298,9 @@ public class BinaryGeometryMessagingStreamingSerializer implements MessagingStre
 	private boolean writePreparedBuffer(Mode mode) throws IOException, SerializerException {
 		try {
 			GeometryMainBuffer geometryMainBuffer = getCurrentMainBuffer();
+			if (geometryMainBuffer == null) {
+				return false;
+			}
 			GeometryBuffer geometryBuffer = geometryMainBuffer.getCurrentReadBuffer();
 			while (geometryBuffer == null || geometryBuffer.isEmpty() || !geometryBuffer.hasNextGeometryMapping()) {
 				if (geometryMainBuffer.hasNextReadBuffer()) {
