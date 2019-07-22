@@ -139,6 +139,7 @@ public class BinaryGeometryMessagingStreamingSerializer implements MessagingStre
 	private boolean normalizeUnitsToMM = false;
 	private boolean useSmallInts = true;
 	private boolean reportProgress = true;
+	private boolean useUuidAndRid = false;
 	private Map<Long, float[]> vertexQuantizationMatrices;
 	
 	private GeometryMainBuffer transparentGeometryBuffer;
@@ -184,6 +185,7 @@ public class BinaryGeometryMessagingStreamingSerializer implements MessagingStre
 		if (queryNode.has("loaderSettings")) {
 			ObjectNode geometrySettings = (ObjectNode) queryNode.get("loaderSettings");
 			
+			useUuidAndRid = geometrySettings.has("useUuidAndRid") && geometrySettings.get("useUuidAndRid").asBoolean();
 			useSingleColors = geometrySettings.has("useObjectColors") && geometrySettings.get("useObjectColors").asBoolean();
 			splitGeometry = geometrySettings.has("splitGeometry") && geometrySettings.get("splitGeometry").asBoolean();
 			quantizeNormals = geometrySettings.has("quantizeNormals") && geometrySettings.get("quantizeNormals").asBoolean();
@@ -342,7 +344,7 @@ public class BinaryGeometryMessagingStreamingSerializer implements MessagingStre
 			int indicesStartByte = 24;
 			int lineIndicesStartByte = indicesStartByte + geometryMapping.getNrIndices() * 4;
 			int indicesMappingStartByte = generateLineRenders ? (lineIndicesStartByte + geometryMapping.getNrLineIndices() * 4) : lineIndicesStartByte;
-			int verticesStartByte = indicesMappingStartByte + geometryMapping.getNrObjects() * 44 + geometryMapping.getTotalColorPackSize();
+			int verticesStartByte = indicesMappingStartByte + geometryMapping.getNrObjects() * (44 + (useUuidAndRid ? 20 : 0)) + geometryMapping.getTotalColorPackSize();
 			int normalsStartByte = verticesStartByte + geometryMapping.getNrVertices() * (quantizeVertices ? 2 : 4);
 			
 			int baseIndex = geometryMapping.getBaseIndex();
@@ -379,6 +381,14 @@ public class BinaryGeometryMessagingStreamingSerializer implements MessagingStre
 				Long oid = (Long)info.get("ifcProductOid");
 				buffer.putLong(indicesMappingStartByte, oid);
 				indicesMappingStartByte += 8;
+				if (useUuidAndRid) {
+					buffer.position(indicesMappingStartByte);
+					byte[] bytes = (byte[])info.get("ifcProductUuid");
+					buffer.put(bytes);
+					indicesMappingStartByte += 16;
+					buffer.putInt(indicesMappingStartByte, (int)info.get("ifcProductRid"));
+					indicesMappingStartByte += 4;
+				}
 				
 				// Start index for object
 				int indicesStart = (indicesStartByte - 24) / 4;
@@ -707,6 +717,12 @@ public class BinaryGeometryMessagingStreamingSerializer implements MessagingStre
 		serializerDataOutputStream.writeByte(MessageType.GEOMETRY_INFO.getId());
 		serializerDataOutputStream.writeByte(inPreparedBuffer ? (byte)1 : (byte)0);
 		serializerDataOutputStream.writeLong(oid);
+		
+		if (useUuidAndRid) {
+			serializerDataOutputStream.write((byte[])info.get("ifcProductUuid"));
+			serializerDataOutputStream.writeInt((int)info.get("ifcProductRid"));
+		}
+		
 		String type = objectProvider.getEClassForOid(oid).getName();
 		serializerDataOutputStream.writeUTF(type);
 		int nrColors = (int)info.eGet(GeometryPackage.eINSTANCE.getGeometryInfo_NrColors());
@@ -796,6 +812,14 @@ public class BinaryGeometryMessagingStreamingSerializer implements MessagingStre
 		
 		serializerDataOutputStream.writeByte(MessageType.MINIMAL_GEOMETRY_INFO.getId());
 		serializerDataOutputStream.writeLong(oid);
+		if (useUuidAndRid) {
+			byte[] b = (byte[])info.get("ifcProductUuid");
+			if (b.length != 16) {
+				throw new RuntimeException("Must be 16 bytes");
+			}
+			serializerDataOutputStream.write(b);
+			serializerDataOutputStream.writeInt((int)info.get("ifcProductRid"));
+		}
 		String type = objectProvider.getEClassForOid(oid).getName();
 		serializerDataOutputStream.writeUTF(type);
 		int nrColors = (int)info.eGet(GeometryPackage.eINSTANCE.getGeometryInfo_NrColors());
@@ -1230,7 +1254,8 @@ public class BinaryGeometryMessagingStreamingSerializer implements MessagingStre
 			((nrVertices / 3) * 2) + // Each vertex uses 2 bytes per normal for (oct-encoded) normals
 			4 + // Density
 			(colorPackData == null ? 0 : colorPackData.length) + //
-			40); // 8 for the oid, 4 for the startIndex, 4 for the nrIndices
+			40 + // 8 for the oid, 4 for the startIndex, 4 for the nrIndices
+			(useUuidAndRid ? 20 : 0)); // 16 bytes for UUID and 4 for rid
 	}
 	
 	private GeometryMainBuffer getCurrentMainBuffer() {
