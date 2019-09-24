@@ -24,6 +24,7 @@ import java.nio.ByteOrder;
 import java.nio.DoubleBuffer;
 import java.nio.FloatBuffer;
 import java.nio.IntBuffer;
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Iterator;
@@ -39,6 +40,7 @@ import org.bimserver.geometry.Vector;
 import org.bimserver.geometry.Vector3D;
 import org.bimserver.interfaces.objects.SVector3f;
 import org.bimserver.models.geometry.GeometryPackage;
+import org.bimserver.models.geometry.util.GeometryAdapterFactory;
 import org.bimserver.plugins.LittleEndianSerializerDataOutputStream;
 import org.bimserver.plugins.PluginManagerInterface;
 import org.bimserver.plugins.SerializerDataOutputStream;
@@ -133,6 +135,7 @@ public class BinaryGeometryMessagingStreamingSerializer implements MessagingStre
 	private boolean splitGeometry = true;
 	private boolean useSingleColors = false;
 	private boolean quantizeNormals = false;
+	private boolean octEncodeNormals = false;
 	private boolean quantizeVertices = false;
 	private boolean quantizeColors = false;
 	private boolean prepareBuffers = false;
@@ -167,6 +170,8 @@ public class BinaryGeometryMessagingStreamingSerializer implements MessagingStre
 
 	private boolean generateLineRenders;
 
+	private float[] lastNormal;
+
 	@Override
 	public void init(ObjectProvider objectProvider, ProjectInfo projectInfo, PluginManagerInterface pluginManager, PackageMetaData packageMetaData) throws SerializerException {
 		this.objectProvider = objectProvider;
@@ -189,6 +194,7 @@ public class BinaryGeometryMessagingStreamingSerializer implements MessagingStre
 			useSingleColors = geometrySettings.has("useObjectColors") && geometrySettings.get("useObjectColors").asBoolean();
 			splitGeometry = geometrySettings.has("splitGeometry") && geometrySettings.get("splitGeometry").asBoolean();
 			quantizeNormals = geometrySettings.has("quantizeNormals") && geometrySettings.get("quantizeNormals").asBoolean();
+			octEncodeNormals = geometrySettings.has("octEncodeNormals") && geometrySettings.get("octEncodeNormals").asBoolean();
 			quantizeVertices = geometrySettings.has("quantizeVertices") && geometrySettings.get("quantizeVertices").asBoolean();
 			quantizeColors = geometrySettings.has("quantizeColors") && geometrySettings.get("quantizeColors").asBoolean();
 			normalizeUnitsToMM = geometrySettings.has("normalizeUnitsToMM") && geometrySettings.get("normalizeUnitsToMM").asBoolean();
@@ -346,6 +352,7 @@ public class BinaryGeometryMessagingStreamingSerializer implements MessagingStre
 			int indicesMappingStartByte = generateLineRenders ? (lineIndicesStartByte + geometryMapping.getNrLineIndices() * 4) : lineIndicesStartByte;
 			int verticesStartByte = indicesMappingStartByte + geometryMapping.getNrObjects() * (44 + (useUuidAndRid ? 20 : 0)) + geometryMapping.getTotalColorPackSize();
 			int normalsStartByte = verticesStartByte + geometryMapping.getNrVertices() * (quantizeVertices ? 2 : 4);
+			int endByte = normalsStartByte + (quantizeNormals ? (octEncodeNormals ? geometryMapping.getNrVertices() / 3 * 2 : geometryMapping.getNrVertices()) : geometryMapping.getNrVertices() * 4);
 			
 			int baseIndex = geometryMapping.getBaseIndex();
 			
@@ -501,35 +508,82 @@ public class BinaryGeometryMessagingStreamingSerializer implements MessagingStre
 				
 				vertexPosition += nrPos;
 				
-				double[] inverted = new double[9];
-				double[] transposed = new double[9];
-				double[] mat3 = new double[9];
-				Matrix3.fromMat4(mat3, ms);
-				Matrix3.invert(inverted, mat3);
-				Matrix3.transpose(transposed, inverted);
-				float[] normalIn = new float[3];
-				float[] normal = new float[3];
-	
-				// We need to apply the inverse transpose
-				for (int i=0; i<nrPos; i+=3) {
-					normalIn[0] = normalsByteBuffer.getFloat();
-					normalIn[1] = normalsByteBuffer.getFloat();
-					normalIn[2] = normalsByteBuffer.getFloat();
-	
-					// Apply the transformation matrix of the object
-					Matrix3.multiplyMV(normal, normalIn, transposed);
-					Vector3D.normalize(normal, normal);
+				if (quantizeNormals) {
+					double[] inverted = new double[9];
+					double[] transposed = new double[9];
+					double[] mat3 = new double[9];
+					Matrix3.fromMat4(mat3, ms);
+					Matrix3.invert(inverted, mat3);
+					Matrix3.transpose(transposed, inverted);
+					float[] normalIn = new float[3];
+					float[] normal = new float[3];
+					
+					// We need to apply the inverse transpose
+					for (int i=0; i<nrPos; i+=3) {
+						normalIn[0] = normalsByteBuffer.getFloat();
+						normalIn[1] = normalsByteBuffer.getFloat();
+						normalIn[2] = normalsByteBuffer.getFloat();
+						
+						// Apply the transformation matrix of the object
+						Matrix3.multiplyMV(normal, normalIn, transposed);
+						Vector3D.normalize(normal, normal);
 
-					writeNormalToOct(buffer, normalsStartByte, normal);
-	
-					normalsStartByte += 2;
+						normalizeNormal(normal);
+						
+						if (octEncodeNormals) {
+							writeNormalToOct(buffer, normalsStartByte, normal);
+							normalsStartByte += 2;
+						} else {
+							buffer.put(normalsStartByte, (byte)(normal[0] * 127));
+							buffer.put(normalsStartByte + 1, (byte)( normal[1] * 127));
+							buffer.put(normalsStartByte + 2, (byte)(normal[2] * 127));
+							normalsStartByte += 3;
+						}
+					}
+				} else {
+					double[] inverted = new double[9];
+					double[] transposed = new double[9];
+					double[] mat3 = new double[9];
+					Matrix3.fromMat4(mat3, ms);
+					Matrix3.invert(inverted, mat3);
+					Matrix3.transpose(transposed, inverted);
+					float[] normalIn = new float[3];
+					float[] normal = new float[3];
+					
+					// We need to apply the inverse transpose
+					for (int i=0; i<nrPos; i+=3) {
+						normalIn[0] = normalsByteBuffer.getFloat();
+						normalIn[1] = normalsByteBuffer.getFloat();
+						normalIn[2] = normalsByteBuffer.getFloat();
+						
+						// Apply the transformation matrix of the object
+						Matrix3.multiplyMV(normal, normalIn, transposed);
+						Vector3D.normalize(normal, normal);
+						
+						buffer.putFloat(normalsStartByte, normal[0]);
+						buffer.putFloat(normalsStartByte + 4, normal[1]);
+						buffer.putFloat(normalsStartByte + 8, normal[2]);
+						
+						normalsStartByte += 12;
+					}
 				}
+			}
+			if (normalsStartByte != endByte) {
+				LOGGER.error("normalsStartByte != endByte (" + normalsStartByte + ", " + endByte + ")");
 			}
 			serializerDataOutputStream.write(buffer.array());
 			serializerDataOutputStream.align8();
 			return geometryMainBuffer.hasNextReadBuffer() || geometryBuffer.hasNextGeometryMapping();
 		} catch (IndexOutOfBoundsException e) {
 			throw e;
+		}
+	}
+
+	private void normalizeNormal(float[] normal) {
+		for (int i=0; i<3; i++) {
+			if (normal[i] > -0.0001 && normal[i] < 0.0001) {
+				normal[i] = 0;
+			}
 		}
 	}
 
@@ -596,7 +650,14 @@ public class BinaryGeometryMessagingStreamingSerializer implements MessagingStre
 		buffer.put(normalsStartByte + 1, b);
 		
 //		System.out.println(normal[0] + ", " + normal[1] + ", " + normal[2]);
-//		System.out.println(a + ", " + b);
+//		if (lastNormal == null || !Arrays.equals(this.lastNormal, normal)) {
+//			System.out.println(normal[0] + ", " + normal[1] + ", " + normal[2]);
+//			System.out.println(a + ", " + b);
+//			if (this.lastNormal == null) {
+//				this.lastNormal = new float[3];
+//			}
+//			System.arraycopy(normal, 0, this.lastNormal, 0, 3);
+//		}
 	}
 
 	private void load() throws SerializerException {
@@ -1251,7 +1312,7 @@ public class BinaryGeometryMessagingStreamingSerializer implements MessagingStre
 			nrIndices * 4 + // Each index number uses 4 bytes
 			(generateLineRenders ? (nrLineIndices * 4) : 0) + // Each line index number uses 4 bytes as well
 			nrVertices * (quantizeVertices ? 2 : 4) + // Each vertex uses 2 bytes (quantized) per number
-			((nrVertices / 3) * 2) + // Each vertex uses 2 bytes per normal for (oct-encoded) normals
+			(quantizeNormals ? (octEncodeNormals ? ((nrVertices / 3) * 2) : nrVertices) : nrVertices * 4) + // Each vertex uses 2 bytes per normal for (oct-encoded) normals
 			4 + // Density
 			(colorPackData == null ? 0 : colorPackData.length) + //
 			40 + // 8 for the oid, 4 for the startIndex, 4 for the nrIndices
