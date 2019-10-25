@@ -1204,18 +1204,25 @@ public class BinaryGeometryMessagingStreamingSerializer implements MessagingStre
 			}
 			
 			if (quantizeNormals && normalsQuantized != null) {
-				float[] floatNormal = new float[3];
-				byte[] oct = new byte[2];
-				serializerDataOutputStream.writeInt((normalsQuantized.length / 3) * 2);
-				for (int i=0; i<normalsQuantized.length; i+=3) {
-					floatNormal[0] = normalsQuantized[i] / 127;
-					floatNormal[1] = normalsQuantized[i + 1] / 127;
-					floatNormal[2] = normalsQuantized[i + 2] / 127;
-					octEncodeFloat(floatNormal, oct);
-					serializerDataOutputStream.write(oct[0]);
-					serializerDataOutputStream.write(oct[1]);
+				if (octEncodeNormals) {
+					float[] floatNormal = new float[3];
+					byte[] oct = new byte[2];
+					serializerDataOutputStream.writeInt((normalsQuantized.length / 3) * 2);
+					for (int i=0; i<normalsQuantized.length; i+=3) {
+						floatNormal[0] = normalsQuantized[i] / 127;
+						floatNormal[1] = normalsQuantized[i + 1] / 127;
+						floatNormal[2] = normalsQuantized[i + 2] / 127;
+						octEncodeFloat(floatNormal, oct);
+						serializerDataOutputStream.write(oct[0]);
+						serializerDataOutputStream.write(oct[1]);
+					}
+					serializerDataOutputStream.align8();
+				} else {
+					serializerDataOutputStream.ensureExtraCapacity(normalsQuantized.length + 4);
+					serializerDataOutputStream.writeInt(normalsQuantized.length);
+					serializerDataOutputStream.write(normalsQuantized);
+					serializerDataOutputStream.align8();
 				}
-				serializerDataOutputStream.align8();
 			} else {
 				serializerDataOutputStream.writeInt(normals.length / 4);
 				serializerDataOutputStream.write(normals);
