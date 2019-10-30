@@ -24,7 +24,6 @@ import java.nio.ByteOrder;
 import java.nio.DoubleBuffer;
 import java.nio.FloatBuffer;
 import java.nio.IntBuffer;
-import java.util.Arrays;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Iterator;
@@ -40,7 +39,6 @@ import org.bimserver.geometry.Vector;
 import org.bimserver.geometry.Vector3D;
 import org.bimserver.interfaces.objects.SVector3f;
 import org.bimserver.models.geometry.GeometryPackage;
-import org.bimserver.models.geometry.util.GeometryAdapterFactory;
 import org.bimserver.plugins.LittleEndianSerializerDataOutputStream;
 import org.bimserver.plugins.PluginManagerInterface;
 import org.bimserver.plugins.SerializerDataOutputStream;
@@ -319,7 +317,7 @@ public class BinaryGeometryMessagingStreamingSerializer implements MessagingStre
 			}
 			if (!geometryBuffer.initSent()) {
 				ByteBuffer buffer = ByteBuffer.allocate(25).order(ByteOrder.LITTLE_ENDIAN);
-	
+
 				buffer.put(mode == Mode.PREPARED_BUFFER_OPAQUE ? MessageType.PREPARED_BUFFER_OPAQUE_INIT.getId() : MessageType.PREPARED_BUFFER_TRANSPARENT_INIT.getId());
 				buffer.putInt(geometryBuffer.getNrObjects());
 				buffer.putInt(geometryBuffer.getNrIndices());
@@ -349,8 +347,9 @@ public class BinaryGeometryMessagingStreamingSerializer implements MessagingStre
 			
 			int indicesStartByte = 24;
 			int lineIndicesStartByte = indicesStartByte + geometryMapping.getNrIndices() * 4;
+			int originalLineIndicesStartByte = lineIndicesStartByte;
 			int indicesMappingStartByte = generateLineRenders ? (lineIndicesStartByte + geometryMapping.getNrLineIndices() * 4) : lineIndicesStartByte;
-			int verticesStartByte = indicesMappingStartByte + geometryMapping.getNrObjects() * (44 + (useUuidAndRid ? 20 : 0)) + geometryMapping.getTotalColorPackSize();
+			int verticesStartByte = indicesMappingStartByte + geometryMapping.getNrObjects() * ((44 + (generateLineRenders ? 8 : 0)) + (useUuidAndRid ? 20 : 0)) + geometryMapping.getTotalColorPackSize();
 			int normalsStartByte = verticesStartByte + geometryMapping.getNrVertices() * (quantizeVertices ? 2 : 4);
 			int endByte = normalsStartByte + (quantizeNormals ? (octEncodeNormals ? geometryMapping.getNrVertices() / 3 * 2 : geometryMapping.getNrVertices()) : geometryMapping.getNrVertices() * 4);
 			
@@ -403,7 +402,7 @@ public class BinaryGeometryMessagingStreamingSerializer implements MessagingStre
 				indicesMappingStartByte += 4;
 				
 				// Start line index for object
-				buffer.putInt(indicesMappingStartByte, (lineIndicesStartByte  - indicesStart) / 4);
+				buffer.putInt(indicesMappingStartByte, (lineIndicesStartByte - originalLineIndicesStartByte) / 4);
 				indicesMappingStartByte += 4;
 
 				// Nr of indices
@@ -432,20 +431,43 @@ public class BinaryGeometryMessagingStreamingSerializer implements MessagingStre
 						maxIndex = modifiedIndex;
 					}
 					
-					buffer.putInt(indicesStartByte, baseIndex + index + (vertexPosition / 3));
+					buffer.putInt(indicesStartByte, modifiedIndex);
 					indicesStartByte += 4;
 				}
 				
+				int minLineIndex = -1;
+				int maxLineIndex = -1;
+				
 				if (generateLineRenders) {
-					buffer.position(lineIndicesStartByte);
-					buffer.put(lineIndicesBytes);
-					lineIndicesStartByte += lineIndicesBytes.length;
+					IntBuffer lineIndicesInt = ByteBuffer.wrap(lineIndicesBytes).order(ByteOrder.LITTLE_ENDIAN).asIntBuffer();
+					
+					for (int i=0; i<lineIndicesInt.capacity(); i++) {
+						int index = lineIndicesInt.get();
+						
+						int modifiedIndex = baseIndex + index + (vertexPosition / 3);
+						if (minLineIndex == -1 || modifiedIndex < minLineIndex) {
+							minLineIndex = modifiedIndex;
+						}
+						if (maxLineIndex == -1 || modifiedIndex > maxLineIndex) {
+							maxLineIndex = modifiedIndex;
+						}
+						
+						buffer.putInt(lineIndicesStartByte, modifiedIndex);
+						lineIndicesStartByte += 4;
+					}
 				}
 				
 				buffer.putInt(indicesMappingStartByte, minIndex);
 				indicesMappingStartByte += 4;
 				buffer.putInt(indicesMappingStartByte, maxIndex);
 				indicesMappingStartByte += 4;
+
+				if (generateLineRenders) {
+					buffer.putInt(indicesMappingStartByte, minLineIndex);
+					indicesMappingStartByte += 4;
+					buffer.putInt(indicesMappingStartByte, maxLineIndex);
+					indicesMappingStartByte += 4;
+				}
 				
 				float density = (float) info.get("density");
 				buffer.putFloat(indicesMappingStartByte, density);
@@ -912,7 +934,7 @@ public class BinaryGeometryMessagingStreamingSerializer implements MessagingStre
 		// This way the client can be sure that geometry data is always available when geometry info is received, simplifying bookkeeping
 		EStructuralFeature hasTransparencyFeature = data.eClass().getEStructuralFeature("hasTransparency");
 		boolean hasTransparancy = (boolean)data.eGet(hasTransparencyFeature);
-
+		
 		if (prepareBuffers && (reusedDataOids == null || !reusedDataOids.contains(oid))) {
 			oidToGeometryData.put(oid, data);
 			if (dataToGeometryInfo.containsKey(oid)) {
@@ -926,6 +948,7 @@ public class BinaryGeometryMessagingStreamingSerializer implements MessagingStre
 		}
 		
 		EStructuralFeature indicesFeature = data.eClass().getEStructuralFeature("indices");
+		EStructuralFeature lineIndicesFeature = data.eClass().getEStructuralFeature("lineIndices");
 		EStructuralFeature verticesFeature = data.eClass().getEStructuralFeature("vertices");
 		EStructuralFeature verticesQuantizedFeature = data.eClass().getEStructuralFeature("verticesQuantized");
 		EStructuralFeature normalsFeature = data.eClass().getEStructuralFeature("normals");
@@ -1116,6 +1139,25 @@ public class BinaryGeometryMessagingStreamingSerializer implements MessagingStre
 			} else {
 				serializerDataOutputStream.write(indicesByteBuffer.array());
 			}
+	
+			if (generateLineRenders) {
+				AbstractHashMapVirtualObject lineIndicesBuffer = data.getDirectFeature(lineIndicesFeature);
+				byte[] lineIndices = (byte[]) lineIndicesBuffer.get("data");
+				ByteBuffer lineIndicesByteBuffer = ByteBuffer.wrap(lineIndices);
+				lineIndicesByteBuffer.order(ByteOrder.LITTLE_ENDIAN);
+				serializerDataOutputStream.writeInt(lineIndicesByteBuffer.capacity() / 4);
+				if (useSmallInts) {
+					IntBuffer intBuffer = lineIndicesByteBuffer.asIntBuffer();
+					serializerDataOutputStream.ensureExtraCapacity(intBuffer.capacity() * 2);
+					for (int i=0; i<intBuffer.capacity(); i++) {
+						serializerDataOutputStream.writeShortUnchecked((short) intBuffer.get());
+					}
+					serializerDataOutputStream.align4();
+				} else {
+					serializerDataOutputStream.write(lineIndicesByteBuffer.array());
+				}
+			}
+			
 			// Added in version 11
 			if (color != null) {
 				serializerDataOutputStream.writeInt(1);
@@ -1322,7 +1364,7 @@ public class BinaryGeometryMessagingStreamingSerializer implements MessagingStre
 			(quantizeNormals ? (octEncodeNormals ? ((nrVertices / 3) * 2) : nrVertices) : nrVertices * 4) + // Each vertex uses 2 bytes per normal for (oct-encoded) normals
 			4 + // Density
 			(colorPackData == null ? 0 : colorPackData.length) + //
-			40 + // 8 for the oid, 4 for the startIndex, 4 for the nrIndices
+			40 + (generateLineRenders ? 8 : 0) + // 8 for the oid, 4 for the startIndex, 4 for the nrIndices
 			(useUuidAndRid ? 20 : 0)); // 16 bytes for UUID and 4 for rid
 	}
 	
