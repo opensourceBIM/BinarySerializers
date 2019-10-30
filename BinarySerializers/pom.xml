@@ -3,7 +3,7 @@
   <modelVersion>4.0.0</modelVersion>
   <groupId>org.opensourcebim</groupId>
   <artifactId>binaryserializers</artifactId>
-  <version>0.0.86</version>
+  <version>0.0.87-SNAPSHOT</version>
   <name>BinarySerializers</name>
   <description>BIMserver plugins that provides binary serializers</description>
   <url>https://github.com/opensourceBIM/BinarySerializers</url>
@@ -27,7 +27,7 @@
   <scm>
     <connection>scm:git:https://github.com/opensourceBIM/BinarySerializers.git</connection>
     <developerConnection>scm:git:https://github.com/opensourceBIM/BinarySerializers.git</developerConnection>
-    <tag>binaryserializers-0.0.86</tag>
+    <tag>binaryserializers-0.0.29</tag>
     <url>https://github.com/opensourceBIM/BinarySerializers.git</url>
   </scm>
   <issueManagement>
