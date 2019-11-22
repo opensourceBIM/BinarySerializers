@@ -93,9 +93,11 @@ public class BinaryGeometryMessagingStreamingSerializer implements MessagingStre
 	 *  - Oct-encoding of normals, mat4 globalTransformation input is now vec3 globalTranslationVector
 	 *  Version 19:
 	 *  - Added optional generateLineRenders, protocol has changed because the counts are always sent regardless of setting
+	 *  Version 20:
+	 *  - Added ifcProductPid
 	 */
 	
-	private static final byte FORMAT_VERSION = 19;
+	private static final byte FORMAT_VERSION = 20;
 	
 	private enum Mode {
 		LOAD,
@@ -349,7 +351,7 @@ public class BinaryGeometryMessagingStreamingSerializer implements MessagingStre
 			int lineIndicesStartByte = indicesStartByte + geometryMapping.getNrIndices() * 4;
 			int originalLineIndicesStartByte = lineIndicesStartByte;
 			int indicesMappingStartByte = generateLineRenders ? (lineIndicesStartByte + geometryMapping.getNrLineIndices() * 4) : lineIndicesStartByte;
-			int verticesStartByte = indicesMappingStartByte + geometryMapping.getNrObjects() * ((44 + (generateLineRenders ? 8 : 0)) + (useUuidAndRid ? 20 : 0)) + geometryMapping.getTotalColorPackSize();
+			int verticesStartByte = indicesMappingStartByte + geometryMapping.getNrObjects() * ((44 + (generateLineRenders ? 8 : 0)) + (useUuidAndRid ? 24 : 0)) + geometryMapping.getTotalColorPackSize();
 			int normalsStartByte = verticesStartByte + geometryMapping.getNrVertices() * (quantizeVertices ? 2 : 4);
 			int endByte = normalsStartByte + (quantizeNormals ? (octEncodeNormals ? geometryMapping.getNrVertices() / 3 * 2 : geometryMapping.getNrVertices()) : geometryMapping.getNrVertices() * 4);
 			
@@ -392,7 +394,11 @@ public class BinaryGeometryMessagingStreamingSerializer implements MessagingStre
 					byte[] bytes = (byte[])info.get("ifcProductUuid");
 					buffer.put(bytes);
 					indicesMappingStartByte += 16;
-					buffer.putInt(indicesMappingStartByte, (int)info.get("ifcProductRid"));
+					int pid = (int)info.get("ifcProductPid");
+					buffer.putInt(indicesMappingStartByte, pid);
+					indicesMappingStartByte += 4;
+					int rid = info.getRid();// (int)info.get("ifcProductRid");
+					buffer.putInt(indicesMappingStartByte, rid);
 					indicesMappingStartByte += 4;
 				}
 				
@@ -803,7 +809,8 @@ public class BinaryGeometryMessagingStreamingSerializer implements MessagingStre
 		
 		if (useUuidAndRid) {
 			serializerDataOutputStream.write((byte[])info.get("ifcProductUuid"));
-			serializerDataOutputStream.writeInt((int)info.get("ifcProductRid"));
+			serializerDataOutputStream.writeInt((int)info.get("ifcProductPid"));
+			serializerDataOutputStream.writeInt(info.getRid());
 		}
 		
 		String type = objectProvider.getEClassForOid(oid).getName();
@@ -896,12 +903,9 @@ public class BinaryGeometryMessagingStreamingSerializer implements MessagingStre
 		serializerDataOutputStream.writeByte(MessageType.MINIMAL_GEOMETRY_INFO.getId());
 		serializerDataOutputStream.writeLong(oid);
 		if (useUuidAndRid) {
-			byte[] b = (byte[])info.get("ifcProductUuid");
-			if (b.length != 16) {
-				throw new RuntimeException("Must be 16 bytes");
-			}
-			serializerDataOutputStream.write(b);
-			serializerDataOutputStream.writeInt((int)info.get("ifcProductRid"));
+			serializerDataOutputStream.write((byte[])info.get("ifcProductUuid"));
+			serializerDataOutputStream.writeInt((int)info.get("ifcProductPid"));
+			serializerDataOutputStream.writeInt(info.getRid());
 		}
 		String type = objectProvider.getEClassForOid(oid).getName();
 		serializerDataOutputStream.writeUTF(type);
@@ -1365,7 +1369,7 @@ public class BinaryGeometryMessagingStreamingSerializer implements MessagingStre
 			4 + // Density
 			(colorPackData == null ? 0 : colorPackData.length) + //
 			40 + (generateLineRenders ? 8 : 0) + // 8 for the oid, 4 for the startIndex, 4 for the nrIndices
-			(useUuidAndRid ? 20 : 0)); // 16 bytes for UUID and 4 for rid
+			(useUuidAndRid ? 24 : 0)); // 16 bytes for UUID and 4 for rid
 	}
 	
 	private GeometryMainBuffer getCurrentMainBuffer() {
