@@ -1192,7 +1192,7 @@ public class BinaryGeometryMessagingStreamingSerializer implements MessagingStre
 					serializerDataOutputStream.writeInt(nrPos);
 
 					vertexByteBuffer.order(ByteOrder.LITTLE_ENDIAN);
-					serializerDataOutputStream.ensureExtraCapacity(vertexByteBuffer.capacity() * 6 / 8);
+					serializerDataOutputStream.ensureExtraCapacity(vertexByteBuffer.capacity() * 2 / 8);
 					double[] vertex = new double[4];
 					double[] result = new double[4];
 					vertex[3] = 1;
