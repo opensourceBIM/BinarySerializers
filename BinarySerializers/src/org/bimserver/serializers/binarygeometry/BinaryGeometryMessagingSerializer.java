@@ -44,6 +44,12 @@ import org.eclipse.emf.ecore.EClass;
 import com.google.common.base.Charsets;
 import com.google.common.io.LittleEndianDataOutputStream;
 
+/**
+ * @author Ruben de Laat
+ *
+ * Use the more efficient BinaryGeometryMessagingStreamingSerializer
+ */
+@Deprecated
 public class BinaryGeometryMessagingSerializer implements MessagingSerializer {
 	private static final byte FORMAT_VERSION = 6;
 	private IfcModelInterface model;

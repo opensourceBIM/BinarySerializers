@@ -27,6 +27,12 @@ import org.bimserver.plugins.serializers.MessagingSerializer;
 import org.bimserver.plugins.serializers.MessagingSerializerPlugin;
 import org.bimserver.shared.exceptions.PluginException;
 
+/**
+ * @author Ruben de Laat
+ * 
+ * Use the more efficient BinaryGeometryMessagingStreamingSerializerPlugin
+ */
+@Deprecated
 public class BinaryGeometryMessagingSerializerPlugin implements MessagingSerializerPlugin {
 
 	@Override
