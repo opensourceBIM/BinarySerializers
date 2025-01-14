@@ -51,7 +51,7 @@
     <dependency>
       <groupId>org.opensourcebim</groupId>
       <artifactId>pluginbase</artifactId>
-      <version>1.5.187-SNAPSHOT</version>
+      <version>1.5.187</version>
     </dependency>
   </dependencies>
   <repositories>
@@ -79,6 +79,7 @@
       <plugin>
         <groupId>org.codehaus.mojo</groupId>
         <artifactId>build-helper-maven-plugin</artifactId>
+        <version>3.6.0</version>
         <executions>
           <execution>
             <id>attach-plugin</id>
