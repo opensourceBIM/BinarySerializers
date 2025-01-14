@@ -51,7 +51,7 @@
     <dependency>
       <groupId>org.opensourcebim</groupId>
       <artifactId>pluginbase</artifactId>
-      <version>1.5.187</version>
+      <version>1.5.188-SNAPSHOT</version>
     </dependency>
   </dependencies>
   <repositories>
@@ -156,6 +156,10 @@
                 </goals>
                 <configuration>
                   <keyname>${gpg.keyname}</keyname>
+                  <gpgArguments>
+                    <arg>--pinentry-mode</arg>
+                    <arg>loopback</arg>
+                  </gpgArguments>
                 </configuration>
               </execution>
             </executions>
